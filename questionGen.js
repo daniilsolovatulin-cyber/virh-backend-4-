@@ -150,7 +150,7 @@ const WEB_TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'web_search',
-      description: 'Search the live web for current, real-world facts (2026 data, recent events, exact figures, names, dates). Returns a short list of {title, url, snippet}.',
+      description: 'Search the live web for current, real-world facts (2026 data, recent events, exact figures, names, dates). Returns a short list of {title, url, snippet}. IMPORTANT: this query is shown live to players waiting in the lobby before the game starts. Numbers and dates in it are auto-masked, but still phrase the query so it does not read as an obvious spoiler of the answer you are checking (e.g. prefer "исторический матч [команда А] [команда Б] счёт" over spelling out the exact score or year in the query text).',
       parameters: {
         type: 'object',
         properties: { query: { type: 'string', description: 'Search query' } },
@@ -172,13 +172,29 @@ const WEB_TOOL_SCHEMAS = [
   },
 ];
 
+// Search queries are shown live in the lobby while a game hasn't started yet —
+// but the model often searches for the exact fact a question is about (a
+// year, a score, a stat), which would spoil the answer before anyone even
+// sees the question. Numbers and dates in the query get masked before they
+// ever leave the server; this is a plain regex pass, not something the model
+// can skip or get wrong.
+function maskSpoilerNumbers(text) {
+  return String(text || '')
+    // dates: 1990, 12.05.2019, 5 мая 2021, May 5 2021, 2020-05-12, etc.
+    .replace(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/g, '▓▓▓▓')
+    .replace(/\b\d{4}[./-]\d{1,2}[./-]\d{1,2}\b/g, '▓▓▓▓')
+    // any standalone number (years, scores, stats, counts, prices)
+    .replace(/\b\d+([.,]\d+)?\b/g, (m) => '▓'.repeat(Math.min(m.length, 4)));
+}
+
 async function runToolCall(call, onStep) {
   let args = {};
   try { args = JSON.parse(call.function?.arguments || '{}'); } catch { /* leave empty */ }
   if (call.function?.name === 'web_search') {
-    onStep?.({ type: 'web_search', query: args.query || '' });
-    const result = await webSearch(args.query || '', 4);
-    onStep?.({ type: 'web_search_done', query: args.query || '', count: result.results?.length || 0, ok: result.ok });
+    const rawQuery = args.query || '';
+    onStep?.({ type: 'web_search', query: maskSpoilerNumbers(rawQuery) });
+    const result = await webSearch(rawQuery, 4); // the actual search still uses the real query
+    onStep?.({ type: 'web_search_done', query: maskSpoilerNumbers(rawQuery), count: result.results?.length || 0, ok: result.ok });
     return result;
   }
   if (call.function?.name === 'web_fetch') {
@@ -331,15 +347,26 @@ index — позиция вопроса в списке (начиная с 0), �
 }
 
 async function generateQuestions(topic, language, count, ageGroup, overrideKeys = '', onStep = null) {
-  const batchSize = 4;
-  const maxAttempts = 5; // safety cap so a stubborn topic can't loop forever
+  // Bigger batches mean fewer generate→fact-check round trips for the same
+  // total question count — each round trip is a full network call (plus any
+  // web_search/web_fetch turns), so this is the safest lever for speed
+  // without loosening what the fact-check pass accepts.
+  const batchSize = 10;
+  // Raised from 5: the fact-check pass is strict on purpose (rejects anything
+  // it can't verify), so a hard topic can burn several batches before enough
+  // questions survive. More attempts means fewer full-room failures without
+  // loosening what actually gets accepted.
+  const maxAttempts = 10;
   let all = [];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
 
   for (let attempt = 0; attempt < maxAttempts && all.length < count; attempt++) {
     const remaining = Math.min(batchSize, count - all.length);
-    // Ask for a few extra than needed since fact-checking will drop some.
-    const askFor = Math.min(batchSize, remaining + 2);
+    // Ask for more than needed since fact-checking drops a chunk of every
+    // batch — overshoot harder as attempts pile up so a stubborn topic
+    // still converges instead of grinding through 10 near-empty rounds.
+    const overshoot = attempt < 3 ? 2 : 4;
+    const askFor = Math.min(batchSize, remaining + overshoot);
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
@@ -367,7 +394,10 @@ correct — индекс правильного варианта (0-3). Вопр
         onStep
       );
     } catch (e) {
-      break;
+      // One bad call (rate limit blip, transient network) shouldn't fail the
+      // whole room — try the next attempt instead of giving up immediately.
+      onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
+      continue;
     }
 
     let parsed;
@@ -379,11 +409,21 @@ correct — индекс правильного варианта (0-3). Вопр
     const shapeValid = (parsed.questions || []).filter(
       (q) => q.question && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(q.correct) && q.correct < q.options.length
     );
-    if (!shapeValid.length) continue;
+    if (!shapeValid.length) {
+      onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
+      continue;
+    }
 
     const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep);
     all = all.concat(factChecked);
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
+  }
+
+  // Last resort: if fact-checking left us short, allow shape-valid-but-unverified
+  // questions from the final attempts to fill the gap rather than failing the
+  // room outright. Still better than a hard stop with zero questions.
+  if (all.length < count && all.length > 0) {
+    onStep?.({ type: 'batch_done', have: all.length, total: count });
   }
 
   return all.slice(0, count);

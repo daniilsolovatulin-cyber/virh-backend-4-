@@ -145,6 +145,9 @@ async function startGame(roomId) {
     broadcast(roomId, { type: 'status', status: 'lobby' });
     return;
   }
+  // A short batch (fact-check trimmed hard on a tough topic) still beats a
+  // full room failure — start with what actually passed rather than making
+  // everyone wait through another generation cycle.
 
   db.prepare(
     "UPDATE rooms SET status = 'playing', questions_json = ?, current_question_idx = 0, updated_at = datetime('now') WHERE id = ?"
@@ -295,9 +298,46 @@ function submitAnswer(roomId, userId, questionIdx, optionIdx) {
 
 function attachSocket(roomId, ws, userId) {
   if (!roomSockets.has(roomId)) roomSockets.set(roomId, new Set());
+  const set = roomSockets.get(roomId);
+  // A reconnect (client-side WS drop/retry) can open a new socket before the
+  // server has noticed the old one died — if both stay registered, every
+  // broadcast (chat messages, lobby updates, everything) gets delivered to
+  // this user twice. Close and drop any existing socket for this user in
+  // this room before registering the new one, so there's ever only one.
+  for (const existing of set) {
+    if (existing.userId === userId) {
+      set.delete(existing);
+      try { existing.ws.close(); } catch (e) {}
+    }
+  }
   const entry = { ws, userId };
-  roomSockets.get(roomId).add(entry);
+  set.add(entry);
   return entry;
+}
+
+// Render (and most mobile carriers/NAT) silently kill an idle WebSocket after
+// roughly 55-100s of no traffic — no close frame, no error, the pipe just
+// stops. Without a heartbeat the *client* only finds out once it tries to
+// send something and the OS finally reports the drop, which the client reads
+// as a real disconnect (see connectRoomSocket in app.js). Pinging periodically
+// keeps the connection classified as active on both ends, and detects the
+// small number of genuinely dead sockets so they can be cleaned up promptly
+// instead of leaking in roomSockets until someone tries to broadcast to them.
+const HEARTBEAT_INTERVAL_MS = 25000;
+
+function startHeartbeat(wss) {
+  const interval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.isAlive === false) {
+        try { ws.terminate(); } catch (e) {}
+        return;
+      }
+      ws.isAlive = false;
+      try { ws.ping(); } catch (e) {}
+    });
+  }, HEARTBEAT_INTERVAL_MS);
+  wss.on('close', () => clearInterval(interval));
+  return interval;
 }
 
 function detachSocket(roomId, entry) {
@@ -362,12 +402,26 @@ function initRealtime(server) {
       socket.destroy();
       return;
     }
+    // Same reset-safety check as authMiddleware: a token whose username/created_at
+    // no longer matches the account currently at that id belongs to a database
+    // that was rebuilt since it was issued — reject it instead of connecting
+    // as whoever now holds that id.
+    const user = db.prepare('SELECT id, username, created_at FROM users WHERE id = ?').get(payload.uid);
+    if (!user || user.username !== payload.username || user.created_at !== payload.createdAt) {
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req, { userId: payload.uid, roomCode: (query.code || '').toUpperCase() });
     });
   });
 
+  startHeartbeat(wss);
+
   wss.on('connection', (ws, req, ctx) => {
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+
     const room = db.prepare('SELECT * FROM rooms WHERE code = ?').get(ctx.roomCode);
     if (!room) {
       sendTo(ws, { type: 'error', message: 'room_not_found' });
