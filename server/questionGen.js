@@ -72,7 +72,10 @@ async function fetchWikipediaContext(topic, language) {
   const pageParams = new URLSearchParams({
     action: 'query',
     prop: 'extracts',
-    exintro: '1',
+    // An intro for broad subjects such as "История" can contain no numbers.
+    // A compact article excerpt gives exact-facts mode enough dated material
+    // without downloading entire Wikipedia pages.
+    exchars: '5000',
     explaintext: '1',
     redirects: '1',
     titles: titles.join('|'),
@@ -85,7 +88,7 @@ async function fetchWikipediaContext(topic, language) {
   if (!pageRes.ok) throw new Error(`source_page_${pageRes.status}`);
   const pageJson = await pageRes.json();
   return Object.values(pageJson?.query?.pages || {})
-    .map((page) => ({ title: plainText(page.title), text: plainText(page.extract).slice(0, 1800) }))
+    .map((page) => ({ title: plainText(page.title), text: plainText(page.extract).slice(0, 3000) }))
     .filter((page) => page.title && page.text && /\d/.test(page.text));
 }
 

@@ -1058,7 +1058,7 @@ function bindSetup() {
       console.error('Ошибка генерации вопросов:', err);
       let msg = 'Не удалось сгенерировать вопросы';
       if (err && err.status === 429) msg = 'Сейчас слишком много новых викторин. Попробуй чуть позже.';
-      else if (err && err.status === 503) msg = 'Генератор временно недоступен. Попробуй ещё раз.';
+      else if (err && err.status === 503) msg = err.message || 'Генератор временно недоступен. Попробуй ещё раз.';
       else if (err && err.status) msg = 'Сервис не смог подготовить вопросы.';
       else if (err && /fetch|network|Failed to fetch/i.test(err.message || '')) msg = 'Нет связи с сервисом. Проверь подключение.';
       showToast(msg, ICONS.cross);
