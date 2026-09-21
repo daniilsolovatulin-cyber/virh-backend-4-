@@ -121,6 +121,22 @@ function showToast(msg, icon) {
   t._timer = setTimeout(() => t.classList.remove('show'), 2800);
 }
 
+// Expressive loader adapted from the supplied reference. One component is used
+// everywhere, so a full generation screen and a compact button stay visually
+// related without forcing the 100px artwork into tiny controls.
+function expressiveLoaderHTML(size = 'large') {
+  return `
+    <svg class="expressive-loader expressive-loader--${size}" viewBox="-30 -30 260 260" role="progressbar" aria-label="Загрузка" aria-busy="true" aria-valuetext="Загрузка">
+      <g class="expressive-loader__shape-group">
+        <path class="expressive-loader__shape" d="M100 52 C126.5 52 148 73.5 148 100 C148 126.5 126.5 148 100 148 C73.5 148 52 126.5 52 100 C52 73.5 73.5 52 100 52 Z"/>
+      </g>
+      <circle class="expressive-loader__drop" style="--drop-angle:0deg" cx="100" cy="100" r="6"/>
+      <circle class="expressive-loader__drop" style="--drop-angle:90deg" cx="100" cy="100" r="6"/>
+      <circle class="expressive-loader__drop" style="--drop-angle:180deg" cx="100" cy="100" r="6"/>
+      <circle class="expressive-loader__drop" style="--drop-angle:270deg" cx="100" cy="100" r="6"/>
+    </svg>`;
+}
+
 async function checkGeneratorStatus() {
   try {
     const health = await Api.health();
@@ -529,7 +545,7 @@ function authHTML() {
             <input type="password" id="authPassword" autocomplete="${isLogin ? 'current-password' : 'new-password'}" placeholder="Минимум 6 символов" required>
           </div>
           <button class="btn-primary" id="authSubmit" type="submit" ${state.authBusy ? 'disabled' : ''}>
-            ${state.authBusy ? '<span class="spinner"></span>' : (isLogin ? ICONS.logIn : ICONS.user)}
+            ${state.authBusy ? expressiveLoaderHTML('inline') : (isLogin ? ICONS.logIn : ICONS.user)}
             ${isLogin ? 'Войти' : 'Создать аккаунт'}
           </button>
         </form>
@@ -1055,18 +1071,12 @@ function bindSetup() {
 /* ============ GENERATING ============ */
 function generatingHTML() {
   const pct = state.genTotal ? Math.round((state.genProgress / state.genTotal) * 100) : 0;
-  const circumference = 2 * Math.PI * 44;
-  const offset = circumference - (pct / 100) * circumference;
   const topic = state.customTopic.trim() || state.selectedTopic || 'Викторина';
   return `
     ${genToplineHTML()}
     <div class="panel gen-wrap view">
-      <div class="gen-ring-wrap">
-        <svg viewBox="0 0 100 100">
-          <circle class="gen-ring-bg" cx="50" cy="50" r="44" fill="none" stroke-width="7"/>
-          <circle class="gen-ring-fg" id="genRingFg" cx="50" cy="50" r="44" fill="none" stroke-width="7"
-            stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
-        </svg>
+      <div class="gen-loader-wrap">
+        ${expressiveLoaderHTML('large')}
         <div class="gen-percent" id="genPercentText">${pct}%</div>
       </div>
       <div class="gen-status" id="genStatusText">Готовлю вопросы...</div>
@@ -1094,12 +1104,8 @@ function updateGenProgress(label) {
   } else if (state.genProgress >= state.genTotal) {
     state.genEtaMs = 0;
   }
-  const circumference = 2 * Math.PI * 44;
-  const offset = circumference - (pct / 100) * circumference;
-  const ring = document.getElementById('genRingFg');
   const percentText = document.getElementById('genPercentText');
   const statusText = document.getElementById('genStatusText');
-  if (ring) ring.style.strokeDashoffset = offset;
   if (percentText) percentText.textContent = pct + '%';
   if (statusText) statusText.textContent = label;
 }
@@ -1392,15 +1398,9 @@ function todTurnBannerHTML() {
 
 function todGeneratingHTML(done, total, label) {
   const pct = total ? Math.round((done / total) * 100) : 0;
-  const circumference = 2 * Math.PI * 44;
-  const offset = circumference - (pct / 100) * circumference;
   return `
-    <div class="gen-ring-wrap">
-      <svg viewBox="0 0 100 100">
-        <circle class="gen-ring-bg" cx="50" cy="50" r="44" fill="none" stroke-width="7"/>
-        <circle class="gen-ring-fg" id="todGenRingFg" cx="50" cy="50" r="44" fill="none" stroke-width="7"
-          stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
-      </svg>
+    <div class="gen-loader-wrap">
+      ${expressiveLoaderHTML('large')}
       <div class="gen-percent" id="todGenPercentText">${pct}%</div>
     </div>
     <div class="gen-status" id="todGenStatusText">${label}</div>
@@ -1409,12 +1409,8 @@ function todGeneratingHTML(done, total, label) {
 
 function updateTodGenProgress(done, total, label) {
   const pct = total ? Math.round((done / total) * 100) : 0;
-  const circumference = 2 * Math.PI * 44;
-  const offset = circumference - (pct / 100) * circumference;
-  const ring = document.getElementById('todGenRingFg');
   const percentText = document.getElementById('todGenPercentText');
   const statusText = document.getElementById('todGenStatusText');
-  if (ring) ring.style.strokeDashoffset = offset;
   if (percentText) percentText.textContent = pct + '%';
   if (statusText) statusText.textContent = label;
 }
@@ -1535,7 +1531,7 @@ function roomCreateHTML() {
       </div>
 
       <button class="btn-primary" id="roomCreateBtn" ${state.roomBusy ? 'disabled' : ''}>
-        ${state.roomBusy ? '<span class="spinner"></span>' : ICONS.plus}
+        ${state.roomBusy ? expressiveLoaderHTML('inline') : ICONS.plus}
         Создать комнату
       </button>
     </div>
@@ -1651,7 +1647,7 @@ function roomJoinHTML() {
           <input type="text" id="roomCodeInput" value="${escapeHtml(state.roomJoinCode || '')}" placeholder="Например, K7QX9" maxlength="8" style="text-transform:uppercase; letter-spacing:0.08em; font-weight:700;" autocomplete="off" required>
         </div>
         <button class="btn-primary" id="roomJoinBtn" type="submit" style="width:auto; padding:0 18px;" ${state.roomBusy ? 'disabled' : ''}>
-          ${state.roomBusy ? '<span class="spinner"></span>' : ICONS.arrowRight}
+          ${state.roomBusy ? expressiveLoaderHTML('inline') : ICONS.arrowRight}
         </button>
       </form>
     </div>
@@ -1666,7 +1662,7 @@ function roomJoinHTML() {
 
 function browseRoomsListHTML() {
   if (state.browseRoomsLoading) {
-    return `<div class="empty-state" style="padding:24px;"><span class="spinner"></span></div>`;
+    return `<div class="empty-state" style="padding:24px;">${expressiveLoaderHTML('compact')}</div>`;
   }
   if (state.browseRoomsError) {
     return `<div class="empty-state" style="padding:20px;"><div class="sub">${escapeHtml(state.browseRoomsError)}</div></div>`;

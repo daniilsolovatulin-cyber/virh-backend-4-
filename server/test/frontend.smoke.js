@@ -86,6 +86,7 @@ const check = (name, cond, extra) => {
   check('generating: таймер «прошло» сверху', genHtml.includes('id="genElapsed"'));
   check('generating: таймер «осталось»', genHtml.includes('id="genEta"'));
   check('generating: кнопка «Отменить»', genHtml.includes('id="genCancelBtn"'));
+  check('generating: expressive-индикатор вместо кольца', genHtml.includes('expressive-loader') && !genHtml.includes('gen-ring-fg'));
   check('generating: размытый предпросмотр данных', genHtml.includes('gen-preview') && genHtml.includes('question-card'));
   check('generating: подсказка темы внутри размытия', /gen-preview[\s\S]*question-category/.test(genHtml));
 
