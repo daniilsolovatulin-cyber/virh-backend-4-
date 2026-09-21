@@ -49,7 +49,7 @@ function plainText(value) {
 // The model does not get to pretend it browsed. For the exact-facts mode we
 // first retrieve a compact public source on the server, then let the model use
 // only that source when it makes questions about dates and numbers.
-async function fetchWikipediaContext(topic, language) {
+async function fetchWikipediaContext(topic, language, usedChronologyFallback = false) {
   const wikiLanguage = WIKIPEDIA_LANGUAGES[language] || 'ru';
   const params = new URLSearchParams({
     action: 'query',
@@ -87,9 +87,16 @@ async function fetchWikipediaContext(topic, language) {
   });
   if (!pageRes.ok) throw new Error(`source_page_${pageRes.status}`);
   const pageJson = await pageRes.json();
-  return Object.values(pageJson?.query?.pages || {})
+  const sources = Object.values(pageJson?.query?.pages || {})
     .map((page) => ({ title: plainText(page.title), text: plainText(page.extract).slice(0, 3000) }))
     .filter((page) => page.title && page.text && /\d/.test(page.text));
+  // Broad subjects sometimes lead to an overview article without a single
+  // number. A chronology is still a public source on the same subject and is
+  // exactly what the dates-and-numbers mode needs; do this fallback once only.
+  if (!sources.length && !usedChronologyFallback) {
+    return fetchWikipediaContext(`Хронология ${topic}`, language, true);
+  }
+  return sources;
 }
 
 async function callGroqWithKey(key, messages, jsonMode) {
