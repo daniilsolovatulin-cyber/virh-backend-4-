@@ -18,21 +18,33 @@ function cleanText(value, fallback, maxLength) {
   return text || fallback;
 }
 
+function requestKey(value) {
+  // A personal key is deliberately request-only: it is never written to the
+  // database, session, logs, or returned to the browser.
+  const key = String(value || '').trim();
+  return key && key.length <= 300 ? key : '';
+}
+
 router.post('/questions', soloLimit, async (req, res, next) => {
-  if (!hasServerKeys()) {
+  const body = req.body || {};
+  const apiKey = requestKey(body.apiKey);
+  if (!hasServerKeys() && !apiKey) {
     return res.status(503).json({ error: 'generator_unavailable', message: 'Генератор временно не настроен.' });
   }
 
   try {
-    const body = req.body || {};
     const topic = cleanText(body.topic, 'Общие знания', 80);
     const language = cleanText(body.language, 'Русский', 30);
     const ageGroup = ['kids', 'teen', 'adult', 'any'].includes(body.ageGroup) ? body.ageGroup : 'any';
     const count = Math.min(30, Math.max(3, parseInt(body.count, 10) || 8));
-    const questions = await generateQuestions(topic, language, count, ageGroup);
+    const exactFacts = body.exactFacts !== false;
+    const questions = await generateQuestions(topic, language, count, ageGroup, apiKey, exactFacts);
 
     if (!questions.length) {
-      return res.status(503).json({ error: 'generator_unavailable', message: 'Не удалось подготовить вопросы. Попробуй ещё раз.' });
+      const message = apiKey
+        ? 'Не удалось подготовить вопросы. Проверь ключ или попробуй другую тему.'
+        : 'Не удалось подготовить точные факты по этой теме. Попробуй другую тему.';
+      return res.status(503).json({ error: 'generator_unavailable', message });
     }
     res.json({ questions });
   } catch (err) {
@@ -41,17 +53,18 @@ router.post('/questions', soloLimit, async (req, res, next) => {
 });
 
 router.post('/truth-or-dare', soloLimit, async (req, res, next) => {
-  if (!hasServerKeys()) {
+  const body = req.body || {};
+  const apiKey = requestKey(body.apiKey);
+  if (!hasServerKeys() && !apiKey) {
     return res.status(503).json({ error: 'generator_unavailable', message: 'Генератор временно не настроен.' });
   }
 
   try {
-    const body = req.body || {};
     const type = body.type === 'dare' ? 'dare' : 'truth';
     const language = cleanText(body.language, 'Русский', 30);
     const ageGroup = ['kids', 'teen', 'adult', 'any'].includes(body.ageGroup) ? body.ageGroup : 'any';
     const interest = cleanText(body.interest, '', 60);
-    const text = await generateTodPrompt(type, language, ageGroup, interest);
+    const text = await generateTodPrompt(type, language, ageGroup, interest, apiKey);
     res.json({ text });
   } catch (err) {
     next(err);

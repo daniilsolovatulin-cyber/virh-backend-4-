@@ -106,8 +106,10 @@ const check = (name, cond, extra) => {
     lastRequest = { url, opts };
     return { ok: true, status: 200, json: async () => ({ questions: [{ question: 'Q', options: ['a', 'b'], correct: 0 }] }) };
   };
-  const generated = await generateQuestionsLocal('Тест', 'Русский', 3, () => {}, 'any');
+  const generated = await generateQuestionsLocal('Тест', 'Русский', 3, () => {}, 'any', 'gsk_temporary', true);
+  const soloPayload = JSON.parse(lastRequest.opts.body);
   check('одиночная игра получает вопросы через сервер', generated.length === 1 && /api\/solo\/questions$/.test(lastRequest.url));
+  check('ключ и точный режим передаются только в запросе', soloPayload.apiKey === 'gsk_temporary' && soloPayload.exactFacts === true);
 
   state.view = 'generating';
   bindGenerating();

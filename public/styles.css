@@ -188,8 +188,8 @@ a { color: var(--accent); }
 }
 
 /* ---------- Переход между экранами («перелистывание») ---------- */
-:root { --page-shift: 52px; }
-:root[data-nav="back"] { --page-shift: -52px; }
+:root { --page-shift: 46px; }
+:root[data-nav="back"] { --page-shift: -46px; }
 
 @keyframes pageIn {
   from { transform: translate3d(var(--page-shift), 0, 0); }
@@ -200,11 +200,11 @@ a { color: var(--accent); }
 }
 
 /* Запасной вариант: анимируем только новую страницу. */
-#appMain.page-in { animation: pageIn 0.28s cubic-bezier(0.2, 0.72, 0.24, 1) both; }
+#appMain.page-in { animation: pageIn 0.42s cubic-bezier(0.16, 0.82, 0.24, 1) both; }
 
 /* Основной вариант: View Transitions листает страницу целиком, без вспышки. */
-::view-transition-old(root) { animation: pageOut 0.24s cubic-bezier(0.4, 0, 1, 1) both; }
-::view-transition-new(root) { animation: pageIn 0.3s cubic-bezier(0.2, 0.72, 0.24, 1) both; }
+::view-transition-old(root) { animation: pageOut 0.32s cubic-bezier(0.36, 0, 0.72, 0.2) both; }
+::view-transition-new(root) { animation: pageIn 0.46s cubic-bezier(0.16, 0.82, 0.24, 1) both; }
 
 .room-leave-btn { margin: 18px auto 0; display: flex; }
 
@@ -858,6 +858,46 @@ a:focus-visible {
 }
 
 .hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
+
+.label-optional { color: var(--ink-faint); font-weight: 500; }
+.key-field { margin-top: 2px; }
+.fact-toggle {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.fact-toggle.active { border-color: var(--accent); background: var(--surface-sunken); }
+.fact-toggle-mark {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-dark);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+.fact-toggle.active .fact-toggle-mark { border-color: var(--accent); background: var(--accent); color: var(--paper); }
+.fact-toggle strong, .fact-toggle small { display: block; }
+.fact-toggle strong { font-size: 13px; }
+.fact-toggle small { margin-top: 3px; color: var(--ink-soft); font-size: 11.5px; line-height: 1.35; }
+
+@media (prefers-reduced-motion: reduce) {
+  #appMain.page-in,
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation-duration: 0.01ms; }
+}
 
 .toast {
   position: fixed;

@@ -24,7 +24,7 @@ GROQ_API_KEYS=gsk_твой_ключ_1,gsk_твой_ключ_2
 CORS_ORIGIN=http://localhost:5173
 ```
 
-`GROQ_API_KEYS` — один или несколько ключей через запятую (сервер сам ротирует их при 429/401). Это общий пул для комнат и одиночной игры: игроки не вводят и не видят ключи в браузере.
+`GROQ_API_KEYS` — один или несколько ключей через запятую (сервер сам ротирует их при 429/401). Это общий пул для комнат и одиночной игры: игроки не вводят и не видят ключи в браузере. В одиночной игре есть и резервное поле для личного ключа: он передаётся только с одним запросом, не сохраняется и не попадает в логи.
 Ключи Groq: https://console.groq.com/keys
 
 Запуск:
@@ -83,7 +83,7 @@ Railway, Render, Fly.io, обычный VPS. Важно:
 - `POST /api/auth/me/avatar` (multipart, поле `avatar`) → `{user}`
 - `DELETE /api/auth/me/avatar` → `{user}`
 - `POST /api/rooms` `{mode, topic, language, questionCount}` → `{room}` (создатель авто-входит)
-- `POST /api/solo/questions` `{topic, language, count, ageGroup}` → `{questions}` (гостевая одиночная игра, с ограничением частоты)
+- `POST /api/solo/questions` `{topic, language, count, ageGroup, apiKey?, exactFacts?}` → `{questions}` (гостевая одиночная игра, с ограничением частоты). При `exactFacts` сервер ищет материалы в открытой Википедии и разрешает модели использовать только полученные факты.
 - `POST /api/solo/truth-or-dare` `{type, language, ageGroup, interest}` → `{text}`
 - `GET /api/rooms/:code` → `{room, members}`
 - `POST /api/rooms/:code/join` → `{room}`

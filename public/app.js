@@ -40,6 +40,9 @@ const state = {
   timerInterval: null,
   ageGroup: 'any',
   interest: '',
+  // Kept in memory only. It disappears on refresh and is never stored in localStorage.
+  generatorKey: '',
+  exactFacts: true,
 
   // truth or dare (solo/local group)
   groupMode: false,
@@ -403,7 +406,7 @@ function homeHTML() {
     <div class="panel hero view">
       <h1>Собери викторину за секунды</h1>
       <p>Задай тему на любом языке — сервис придумает вопросы. Играй один или позови друзей в общую комнату.</p>
-      ${state.serviceAvailable === false ? '<p class="service-warning">Генератор сейчас недоступен. Проверь, что сервер запущен и в нём добавлен пул ключей.</p>' : ''}
+      ${state.serviceAvailable === false ? '<p class="service-warning">Общий ключ генератора пока не подключён. Для одиночной игры можно вставить свой ключ на следующем экране; для комнат нужен ключ сервера.</p>' : ''}
     </div>
 
     <div class="section-label">С друзьями</div>
@@ -871,9 +874,9 @@ function renderThemeRow() {
 
 /* ============ SOLO GENERATION VIA SERVER ============ */
 
-async function generateQuestionsLocal(topic, language, count, onProgress, ageGroup) {
-  onProgress(0, count, 'Подключаю библиотеку вопросов…');
-  const result = await Api.generateSoloQuestions({ topic, language, count, ageGroup });
+async function generateQuestionsLocal(topic, language, count, onProgress, ageGroup, apiKey, exactFacts) {
+  onProgress(0, count, exactFacts ? 'Ищу даты и числа в открытых источниках…' : 'Подключаю библиотеку вопросов…');
+  const result = await Api.generateSoloQuestions({ topic, language, count, ageGroup, apiKey, exactFacts });
   onProgress(result.questions.length, count, 'Вопросы готовы');
   return result.questions;
 }
@@ -881,7 +884,7 @@ async function generateQuestionsLocal(topic, language, count, onProgress, ageGro
 async function generateTodPromptLocal(type, language, ageGroup, interest, onProgress) {
   try {
     if (onProgress) onProgress(1, 4, 'Подбираю карточку…');
-    const result = await Api.generateTodPrompt({ type, language, ageGroup, interest });
+    const result = await Api.generateTodPrompt({ type, language, ageGroup, interest, apiKey: state.generatorKey });
     if (onProgress) onProgress(4, 4, 'Готово');
     return result.text;
   } catch (e) {
@@ -926,6 +929,20 @@ function setupHTML() {
         </select>
       </div>
 
+      <div class="field fact-mode">
+        <label>Формат вопросов</label>
+        <button class="fact-toggle ${state.exactFacts ? 'active' : ''}" type="button" id="exactFactsToggle" aria-pressed="${state.exactFacts}">
+          <span class="fact-toggle-mark">${state.exactFacts ? '✓' : ''}</span>
+          <span><strong>Точные даты и числа</strong><small>Ищу факты в открытых источниках перед генерацией</small></span>
+        </button>
+      </div>
+
+      <div class="field key-field">
+        <label for="generatorKeyInput">Ключ генератора <span class="label-optional">необязательно</span></label>
+        <input type="password" id="generatorKeyInput" autocomplete="off" spellcheck="false" placeholder="gsk_…" value="${escapeHtml(state.generatorKey)}">
+        <p class="hint">Нужен, если общий генератор временно недоступен. Используется только для этого запуска и не сохраняется.</p>
+      </div>
+
       <div class="field">
         <label>${isBlitz ? 'Длительность раунда' : 'Количество вопросов'}</label>
         <div class="chip-row" id="countChips">
@@ -968,6 +985,16 @@ function bindSetup() {
 
   document.getElementById('languageSelect').onchange = (e) => { state.language = e.target.value; };
 
+  document.getElementById('exactFactsToggle').onclick = () => {
+    state.exactFacts = !state.exactFacts;
+    const toggle = document.getElementById('exactFactsToggle');
+    toggle.classList.toggle('active', state.exactFacts);
+    toggle.setAttribute('aria-pressed', String(state.exactFacts));
+    toggle.querySelector('.fact-toggle-mark').textContent = state.exactFacts ? '✓' : '';
+  };
+
+  document.getElementById('generatorKeyInput').oninput = (e) => { state.generatorKey = e.target.value.trim(); };
+
   document.querySelectorAll('#countChips .chip').forEach((chip) => {
     chip.onclick = () => {
       if (chip.dataset.count) state.questionCount = parseInt(chip.dataset.count, 10);
@@ -991,7 +1018,7 @@ function bindSetup() {
         state.genProgress = done;
         state.genTotal = total;
         updateGenProgress(label);
-      }, state.ageGroup);
+      }, state.ageGroup, state.generatorKey, state.exactFacts);
       stopGenTicker();
       if (state.view !== 'generating') return; // пользователь ушёл с экрана генерации
       if (!qs.length) throw new Error('empty');
@@ -1036,7 +1063,7 @@ function generatingHTML() {
         <div class="gen-percent" id="genPercentText">${pct}%</div>
       </div>
       <div class="gen-status" id="genStatusText">Готовлю вопросы...</div>
-      <div class="gen-sub">Подбираю формулировки и варианты ответов</div>
+      <div class="gen-sub">Проверяю факты, формулировки и варианты ответов</div>
       ${genPreviewHTML(topic)}
     </div>
   `;
