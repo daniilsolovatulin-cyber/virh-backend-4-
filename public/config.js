@@ -24,7 +24,11 @@ const API_BASE = (function () {
     return origin;
   }
 
-  return 'https://virh-backend.onrender.com';
+  // When Express serves the frontend (the production setup), the API is on the
+  // same origin. A separately hosted frontend can still provide VIHR_API_BASE.
+  if (protocol !== 'file:') return origin;
+
+  return 'https://virh-backend-4.onrender.com';
 })();
 
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
