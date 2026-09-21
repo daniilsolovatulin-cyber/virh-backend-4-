@@ -1,14 +1,23 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const db = require('./db/init');
 
-const FALLBACK_SECRET = 'dev_secret_change_me';
 if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
   throw new Error(
     'JWT_SECRET is not set. Refusing to start in production with the default secret — ' +
     'anyone who knows it could forge login tokens. Set JWT_SECRET in server/.env.'
   );
 }
-const JWT_SECRET = process.env.JWT_SECRET || FALLBACK_SECRET;
+// Never fall back to a hardcoded constant — it would let anyone forge login tokens.
+// Without JWT_SECRET we generate a random one for this process; sessions simply do not
+// survive a restart, and the client handles that by asking to log in again.
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+if (!process.env.JWT_SECRET) {
+  console.warn(
+    '⚠️  JWT_SECRET не задан — сгенерирован случайный ключ на этот запуск. ' +
+    'После перезапуска все сессии станут недействительны. Задайте JWT_SECRET в server/.env.'
+  );
+}
 const TOKEN_TTL = '30d';
 
 function signToken(user) {

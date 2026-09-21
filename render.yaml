@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: vihr-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: GROQ_API_KEYS
+        sync: false

@@ -1,22 +1,11 @@
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const { customAlphabet } = require('nanoid');
 const db = require('../db/init');
 const { authMiddleware } = require('../auth');
 const { publicUser } = require('./auth');
-const { rateLimit } = require('../rateLimit');
 
 const router = express.Router();
-const roomApiKeys = new Map();
 const nanoid = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 5); // no confusing chars
-
-// Guarding room-password guesses the same way login is guarded — a 4-6 char
-// room code is small enough to brute force quickly without this.
-const joinLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 30,
-  message: 'Слишком много попыток. Подождите немного.',
-});
 
 function roomByCode(code) {
   return db.prepare('SELECT * FROM rooms WHERE code = ?').get(code.toUpperCase());
@@ -40,10 +29,7 @@ function publicRoom(room) {
     name: room.name || room.topic,
     language: room.language,
     questionCount: room.question_count,
-    questionSeconds: room.question_seconds || 20,
     maxPlayers: room.max_players || 0, // 0 = no limit
-    teamMode: !!room.team_mode,
-    hasPassword: !!room.password_hash,
     status: room.status,
     currentQuestionIdx: room.current_question_idx,
   };
@@ -55,7 +41,7 @@ function activeMemberCount(roomId) {
 
 // ---------- Create room ----------
 router.post('/', authMiddleware, (req, res) => {
-  const { mode, topic, name, language, questionCount, apiKey, maxPlayers, password, questionSeconds } = req.body || {};
+  const { mode, topic, name, language, questionCount, maxPlayers } = req.body || {};
   const allowedModes = ['classic', 'blitz'];
   const finalMode = allowedModes.includes(mode) ? mode : 'classic';
   const finalTopic = (topic || 'Общие знания').toString().slice(0, 80);
@@ -65,21 +51,14 @@ router.post('/', authMiddleware, (req, res) => {
   // 0 = no limit, host can pick any cap from 2 to 64
   const parsedMax = parseInt(maxPlayers, 10);
   const finalMaxPlayers = Number.isInteger(parsedMax) && parsedMax > 0 ? Math.min(64, Math.max(2, parsedMax)) : 0;
-  const parsedSeconds = parseInt(questionSeconds, 10);
-  const finalQuestionSeconds = Number.isInteger(parsedSeconds) ? Math.min(60, Math.max(5, parsedSeconds)) : 20;
-  const cleanPassword = String(password || '').trim().slice(0, 40);
-  const passwordHash = cleanPassword ? bcrypt.hashSync(cleanPassword, 10) : null;
 
   const code = generateUniqueCode();
   const info = db
     .prepare(
-      `INSERT INTO rooms (code, host_user_id, mode, name, topic, language, question_count, question_seconds, max_players, password_hash, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'lobby')`
+      `INSERT INTO rooms (code, host_user_id, mode, name, topic, language, question_count, max_players, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'lobby')`
     )
-    .run(code, req.userId, finalMode, finalName, finalTopic, finalLanguage, finalCount, finalQuestionSeconds, finalMaxPlayers, passwordHash);
-  const cleanKey = String(apiKey || '').trim();
-  if (cleanKey) roomApiKeys.set(Number(info.lastInsertRowid), cleanKey);
-
+    .run(code, req.userId, finalMode, finalName, finalTopic, finalLanguage, finalCount, finalMaxPlayers);
   db.prepare('INSERT INTO room_members (room_id, user_id, is_ready) VALUES (?, ?, 1)').run(
     info.lastInsertRowid,
     req.userId
@@ -114,12 +93,6 @@ router.patch('/:code', authMiddleware, (req, res) => {
     }
     updates.push('max_players = ?');
     params.push(finalMaxPlayers);
-  }
-
-  if (body.password !== undefined) {
-    const cleanPassword = String(body.password || '').trim().slice(0, 40);
-    updates.push('password_hash = ?');
-    params.push(cleanPassword ? bcrypt.hashSync(cleanPassword, 10) : null);
   }
 
   if (!updates.length) return res.status(400).json({ error: 'nothing_to_update' });
@@ -169,19 +142,9 @@ router.get('/:code', authMiddleware, (req, res) => {
   const room = roomByCode(req.params.code);
   if (!room) return res.status(404).json({ error: 'room_not_found' });
 
-  const isMember = !!db
-    .prepare('SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ? AND left_at IS NULL')
-    .get(room.id, req.userId);
-
-  // Non-members of a locked room only get enough to render the password
-  // prompt — no member list, no live game state — until they've joined.
-  if (room.password_hash && !isMember) {
-    return res.json({ room: publicRoom(room), members: [], locked: true });
-  }
-
   const members = db
     .prepare(
-      `SELECT u.id, u.username, u.display_name, u.avatar_url, u.avatar_emoji, u.avatar_color, rm.score, rm.is_ready, rm.team
+      `SELECT u.id, u.username, u.display_name, u.avatar_url, u.avatar_emoji, u.avatar_color, rm.score, rm.is_ready
        FROM room_members rm JOIN users u ON u.id = rm.user_id
        WHERE rm.room_id = ? AND rm.left_at IS NULL
        ORDER BY rm.joined_at ASC`
@@ -199,44 +162,39 @@ router.get('/:code', authMiddleware, (req, res) => {
       avatarColor: m.avatar_color,
       score: m.score,
       isReady: !!m.is_ready,
-      team: m.team || null,
     })),
   });
 });
 
 // ---------- Join room (adds membership row; WS handles live presence) ----------
-router.post('/:code/join', authMiddleware, joinLimiter, (req, res) => {
+router.post('/:code/join', authMiddleware, (req, res) => {
   const room = roomByCode(req.params.code);
   if (!room) return res.status(404).json({ error: 'room_not_found' });
-  if (room.status !== 'lobby') return res.status(409).json({ error: 'room_already_started' });
 
   const existing = db
     .prepare('SELECT * FROM room_members WHERE room_id = ? AND user_id = ?')
     .get(room.id, req.userId);
 
-  // Existing members (rejoining after a drop) and the host skip the password
-  // check — the check is only for someone joining the room for the first time.
-  if (!existing && room.password_hash) {
-    const { password } = req.body || {};
-    if (!password || !bcrypt.compareSync(String(password), room.password_hash)) {
-      return res.status(403).json({ error: 'wrong_password', message: 'Неверный пароль комнаты.' });
-    }
-  }
-
+  // Someone who is already a member may come back at any time — including mid-game after a
+  // page reload. Blocking that (as "room_already_started") locked players out of a game
+  // they were still part of, since the room keeps their membership row.
   if (existing) {
     if (existing.left_at) {
       db.prepare('UPDATE room_members SET left_at = NULL WHERE id = ?').run(existing.id);
     }
-  } else {
-    const memberCount = activeMemberCount(room.id);
-    if (room.max_players > 0 && memberCount >= room.max_players) {
-      return res.status(409).json({ error: 'room_full' });
-    }
-
-    db.prepare('INSERT INTO room_members (room_id, user_id) VALUES (?, ?)').run(room.id, req.userId);
+    return res.json({ room: publicRoom(room) });
   }
+
+  if (room.status !== 'lobby') return res.status(409).json({ error: 'room_already_started' });
+
+  const memberCount = activeMemberCount(room.id);
+  if (room.max_players > 0 && memberCount >= room.max_players) {
+    return res.status(409).json({ error: 'room_full' });
+  }
+
+  db.prepare('INSERT INTO room_members (room_id, user_id) VALUES (?, ?)').run(room.id, req.userId);
 
   res.json({ room: publicRoom(room) });
 });
 
-module.exports = { router, roomByCode, publicRoom, roomApiKeys };
+module.exports = { router, roomByCode, publicRoom };

@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS rooms (
   mode TEXT NOT NULL DEFAULT 'classic',
   name TEXT,
   topic TEXT,
+  age_group TEXT NOT NULL DEFAULT 'any',
   language TEXT NOT NULL DEFAULT 'Русский',
   question_count INTEGER NOT NULL DEFAULT 10,
   max_players INTEGER NOT NULL DEFAULT 0,
@@ -118,22 +119,10 @@ CREATE TABLE IF NOT EXISTS room_members (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   score INTEGER NOT NULL DEFAULT 0,
   is_ready INTEGER NOT NULL DEFAULT 0,
-  team TEXT,
   joined_at TEXT NOT NULL DEFAULT (datetime('now')),
   left_at TEXT,
   UNIQUE(room_id, user_id)
 );
-CREATE TABLE IF NOT EXISTS room_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-  from_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  to_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-  team TEXT,
-  scope TEXT NOT NULL DEFAULT 'lobby',
-  body TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_room_messages_room ON room_messages(room_id, created_at);
 CREATE TABLE IF NOT EXISTS room_answers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
@@ -149,10 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_room_answers_room_q ON room_answers(room_id, ques
 `);
 try { db.exec("ALTER TABLE rooms ADD COLUMN name TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN max_players INTEGER NOT NULL DEFAULT 0"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN password_hash TEXT"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN question_seconds INTEGER NOT NULL DEFAULT 20"); } catch (e) {}
-try { db.exec("ALTER TABLE rooms ADD COLUMN team_mode INTEGER NOT NULL DEFAULT 0"); } catch (e) {}
-try { db.exec("ALTER TABLE room_members ADD COLUMN team TEXT"); } catch (e) {}
+try { db.exec("ALTER TABLE rooms ADD COLUMN age_group TEXT NOT NULL DEFAULT 'any'"); } catch (e) {}
 db.exec("UPDATE rooms SET name = topic WHERE name IS NULL OR name = ''");
 const avatarsDir = path.join(__dirname, '..', 'uploads', 'avatars');
 if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
