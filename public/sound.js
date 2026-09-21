@@ -13,15 +13,7 @@ const Sound = (function () {
     'audio/music/track-3.mp3',
   ];
 
-  // localStorage can hold anything (older version, manual edit) — never let it throw.
-  const prefs = (function () {
-    try {
-      const parsed = JSON.parse(localStorage.getItem('quiz_sound_prefs') || '{}');
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (e) {
-      return {};
-    }
-  })();
+  const prefs = JSON.parse(localStorage.getItem('quiz_sound_prefs') || '{}');
   const state = {
     muted: prefs.muted === true,
     sfxVolume: typeof prefs.sfxVolume === 'number' ? prefs.sfxVolume : 0.7,

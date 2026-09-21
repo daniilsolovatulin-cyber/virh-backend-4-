@@ -4,9 +4,8 @@ const { rateLimit } = require('../rateLimit');
 
 const router = express.Router();
 
-// Guests can play without an account or personal API key. The shared provider-key
-// pool stays in the deployment environment, while this limit protects that pool
-// from accidental loops and straightforward abuse.
+// Guests can play without an account. This protects the shared server key
+// from accidental loops while still allowing a personal one-off key.
 const soloLimit = rateLimit({
   windowMs: 10 * 60 * 1000,
   max: 6,
@@ -19,32 +18,37 @@ function cleanText(value, fallback, maxLength) {
 }
 
 function requestKey(value) {
-  // A personal key is deliberately request-only: it is never written to the
-  // database, session, logs, or returned to the browser.
+  // Deliberately request-only: never written to DB, session, logs, or response.
   const key = String(value || '').trim();
-  return key && key.length <= 300 ? key : '';
+  return key.length <= 300 ? key : '';
+}
+
+function ageGroup(value) {
+  return ({ teen: 'teens', adult: 'adults' })[value] || (['kids', 'teens', 'adults', 'any'].includes(value) ? value : 'any');
+}
+
+function generatorReady(personalKey) {
+  return hasServerKeys() || !!personalKey;
 }
 
 router.post('/questions', soloLimit, async (req, res, next) => {
   const body = req.body || {};
   const apiKey = requestKey(body.apiKey);
-  if (!hasServerKeys() && !apiKey) {
+  if (!generatorReady(apiKey)) {
     return res.status(503).json({ error: 'generator_unavailable', message: 'Генератор временно не настроен.' });
   }
-
   try {
-    const topic = cleanText(body.topic, 'Общие знания', 80);
-    const language = cleanText(body.language, 'Русский', 30);
-    const ageGroup = ['kids', 'teen', 'adult', 'any'].includes(body.ageGroup) ? body.ageGroup : 'any';
-    const count = Math.min(30, Math.max(3, parseInt(body.count, 10) || 8));
-    const exactFacts = body.exactFacts !== false;
-    const questions = await generateQuestions(topic, language, count, ageGroup, apiKey, exactFacts);
-
+    const questions = await generateQuestions(
+      cleanText(body.topic, 'Общие знания', 80),
+      cleanText(body.language, 'Русский', 30),
+      Math.min(30, Math.max(3, parseInt(body.count, 10) || 8)),
+      ageGroup(body.ageGroup),
+      apiKey,
+      null,
+      body.exactFacts !== false
+    );
     if (!questions.length) {
-      const message = apiKey
-        ? 'Не удалось подготовить вопросы. Проверь ключ или попробуй другую тему.'
-        : 'Не удалось подготовить точные факты по этой теме. Попробуй другую тему.';
-      return res.status(503).json({ error: 'generator_unavailable', message });
+      return res.status(503).json({ error: 'generator_unavailable', message: 'Не удалось подготовить проверенные вопросы. Попробуй другую тему.' });
     }
     res.json({ questions });
   } catch (err) {
@@ -55,16 +59,17 @@ router.post('/questions', soloLimit, async (req, res, next) => {
 router.post('/truth-or-dare', soloLimit, async (req, res, next) => {
   const body = req.body || {};
   const apiKey = requestKey(body.apiKey);
-  if (!hasServerKeys() && !apiKey) {
+  if (!generatorReady(apiKey)) {
     return res.status(503).json({ error: 'generator_unavailable', message: 'Генератор временно не настроен.' });
   }
-
   try {
-    const type = body.type === 'dare' ? 'dare' : 'truth';
-    const language = cleanText(body.language, 'Русский', 30);
-    const ageGroup = ['kids', 'teen', 'adult', 'any'].includes(body.ageGroup) ? body.ageGroup : 'any';
-    const interest = cleanText(body.interest, '', 60);
-    const text = await generateTodPrompt(type, language, ageGroup, interest, apiKey);
+    const text = await generateTodPrompt(
+      body.type === 'dare' ? 'dare' : 'truth',
+      cleanText(body.language, 'Русский', 30),
+      ageGroup(body.ageGroup),
+      cleanText(body.interest, '', 60),
+      apiKey
+    );
     res.json({ text });
   } catch (err) {
     next(err);

@@ -83,7 +83,6 @@ a { color: var(--accent); }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-  ::view-transition-old(root), ::view-transition-new(root), ::view-transition-group(root) { animation: none !important; }
 }
 
 /* ---------- Shell ---------- */
@@ -132,8 +131,8 @@ a { color: var(--accent); }
 .header-actions { display: flex; align-items: center; gap: 8px; }
 
 .icon-btn {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--surface);
@@ -182,29 +181,26 @@ a { color: var(--accent); }
 #appMain {
   flex: 1;
   width: 100%;
-  max-width: 720px;
+  max-width: 780px;
   margin: 0 auto;
-  padding: 22px 18px 48px;
+  padding: 28px 20px 60px;
 }
 
-/* ---------- Переход между экранами («перелистывание») ---------- */
-:root { --page-shift: 46px; }
-:root[data-nav="back"] { --page-shift: -46px; }
+.view { animation: viewIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both; }
+/* Set on #appMain by render() just before a same-view (data-only) update, so
+   .view children never replay their entrance fade/slide — see render() in
+   app.js. Declared right after the base rule so normal cascade order alone
+   makes it win, no !important needed. */
+#appMain.no-entrance-anim .view { animation: none; }
+@keyframes viewIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-@keyframes pageIn {
-  from { transform: translate3d(var(--page-shift), 0, 0); }
-  to { transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .view, .answer-btn, .chip, .btn-primary, .btn-secondary, .btn-ghost,
+  .panel, .mode-card, .score-badge, .switch, .switch-knob, .modal-overlay, .modal-card,
+  .round-start-overlay, .round-start-num, .toast, .member-row { animation: none !important; transition: none !important; }
 }
-@keyframes pageOut {
-  to { transform: translate3d(calc(var(--page-shift) * -0.62), 0, 0); }
-}
 
-/* Запасной вариант: анимируем только новую страницу. */
-#appMain.page-in { animation: pageIn 0.42s cubic-bezier(0.16, 0.82, 0.24, 1) both; }
-
-/* Основной вариант: View Transitions листает страницу целиком, без вспышки. */
-::view-transition-old(root) { animation: pageOut 0.32s cubic-bezier(0.36, 0, 0.72, 0.2) both; }
-::view-transition-new(root) { animation: pageIn 0.46s cubic-bezier(0.16, 0.82, 0.24, 1) both; }
+#appMain.leaving { opacity: 0; transition: opacity 0.15s ease; }
 
 .room-leave-btn { margin: 18px auto 0; display: flex; }
 
@@ -225,16 +221,36 @@ a { color: var(--accent); }
 
 /* ---------- Hero ---------- */
 .hero {
-  padding: 24px 22px;
+  padding: 30px 26px;
   margin-bottom: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.hero::before {
+  /* Purely decorative accent glow — no image asset, just a soft radial tint
+     behind the text so the hero isn't a flat white block. */
+  content: '';
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-dim) 0%, transparent 70%);
+  pointer-events: none;
+}
+:root[data-theme="dark"] .hero::before {
+  background: radial-gradient(circle, var(--accent-dim) 0%, transparent 70%);
+  opacity: 0.5;
 }
 .hero h1 {
-  font-size: 23px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1.25;
   margin: 0 0 8px;
   letter-spacing: -0.01em;
   max-width: 480px;
+  position: relative;
 }
 .hero p {
   color: var(--ink-soft);
@@ -242,15 +258,7 @@ a { color: var(--accent); }
   line-height: 1.6;
   max-width: 440px;
   margin: 0;
-}
-.service-warning {
-  margin-top: 14px !important;
-  padding: 9px 10px;
-  border-left: 3px solid var(--warn);
-  background: var(--warn-dim);
-  color: var(--ink-soft) !important;
-  font-size: 12.5px !important;
-  line-height: 1.45 !important;
+  position: relative;
 }
 
 /* ---------- Mode grid ---------- */
@@ -258,7 +266,7 @@ a { color: var(--accent); }
 @media (max-width: 560px) { .mode-grid { grid-template-columns: 1fr; } }
 
 .mode-card {
-  padding: 16px;
+  padding: 18px;
   cursor: pointer;
   border: 1px solid var(--line);
   background: var(--surface);
@@ -267,10 +275,10 @@ a { color: var(--accent); }
   flex-direction: column;
   gap: 10px;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
-.mode-card:hover { border-color: var(--ink); }
-.mode-card:active { background: var(--surface-sunken); }
+.mode-card:hover { border-color: var(--ink); transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.mode-card:active { background: var(--surface-sunken); transform: translateY(0) scale(0.99); }
 
 .mode-card.featured {
   border-color: var(--ink);
@@ -293,6 +301,14 @@ a { color: var(--accent); }
   justify-content: center;
 }
 .mode-icon svg { width: 17px; height: 17px; }
+
+/* Per-category accent colors so the grid isn't monochrome grey-on-white —
+   each mode gets its own tint instead of sharing the same neutral chip. */
+.mode-icon-violet { background: var(--accent-dim); color: var(--accent); }
+.mode-icon-green { background: var(--good-dim); color: var(--good); }
+.mode-icon-amber { background: var(--warn-dim); color: var(--warn); }
+.mode-icon-pink { background: #FCE7EF; color: #C23D74; }
+:root[data-theme="dark"] .mode-icon-pink { background: #3A1E2C; color: #E888B3; }
 
 .mode-title { font-weight: 700; font-size: 15px; }
 .mode-title svg { width: 18px; height: 18px; flex: 0 0 18px; }
@@ -352,22 +368,13 @@ a { color: var(--accent); }
   font-weight: 600;
   cursor: pointer;
   color: var(--ink-soft);
-  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease, transform 0.12s ease;
 }
-.chip.active { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.chip.active { background: var(--ink); border-color: var(--ink); color: var(--paper); animation: chipPop 0.22s cubic-bezier(0.3, 1.4, 0.5, 1); }
 :root[data-theme="dark"] .chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .chip:hover:not(.active) { border-color: var(--line-strong); color: var(--ink); }
-
-.mode-card:focus-visible,
-.chip:focus-visible,
-.theme-opt:focus-visible,
-.emoji-opt:focus-visible,
-.color-opt:focus-visible,
-button:focus-visible,
-a:focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 3px;
-}
+.chip:active { transform: scale(0.94); }
+@keyframes chipPop { 0% { transform: scale(0.9); } 60% { transform: scale(1.05); } 100% { transform: scale(1); } }
 
 .btn-primary {
   width: 100%;
@@ -383,11 +390,11 @@ a:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
 }
 :root[data-theme="dark"] .btn-primary { background: var(--accent); color: var(--accent-ink); }
 .btn-primary:hover { opacity: 0.88; }
-.btn-primary:active { opacity: 0.78; }
+.btn-primary:active:not(:disabled) { opacity: 0.78; transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary svg { width: 15px; height: 15px; }
 
@@ -405,8 +412,10 @@ a:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  transition: border-color 0.15s ease, transform 0.12s ease;
 }
 .btn-secondary:hover { border-color: var(--ink); }
+.btn-secondary:active { transform: scale(0.98); }
 
 .btn-ghost {
   padding: 10px 16px;
@@ -420,9 +429,13 @@ a:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 .btn-ghost:hover { border-color: var(--ink); color: var(--ink); }
+.btn-ghost:active { transform: scale(0.96); }
 .btn-ghost svg { width: 14px; height: 14px; }
+.btn-ghost.spinning svg { animation: btnRefreshSpin 0.7s linear infinite; }
+@keyframes btnRefreshSpin { to { transform: rotate(360deg); } }
 
 .btn-danger-text {
   background: none;
@@ -511,6 +524,20 @@ a:focus-visible {
 .color-opt.active { border-color: var(--ink); }
 
 /* ---------- Room lobby ---------- */
+.reconnect-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  margin-bottom: 10px;
+  background: var(--warn-dim);
+  border-color: var(--warn);
+  color: var(--warn);
+  font-size: 13px;
+  font-weight: 600;
+}
+.reconnect-banner .loader { color: var(--warn); }
+
 .room-code-banner {
   display: flex;
   align-items: center;
@@ -521,6 +548,37 @@ a:focus-visible {
 .room-code-banner .lbl { font-size: 12px; color: var(--ink-soft); font-weight: 600; margin-bottom: 4px; }
 .room-code-banner .code { font-size: 26px; font-weight: 700; letter-spacing: 0.08em; }
 
+.room-capacity-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.room-capacity-avatars { display: flex; align-items: center; }
+.room-capacity-avatars .avatar {
+  border: 2px solid var(--surface);
+  margin-left: -8px;
+}
+.room-capacity-avatars .avatar:first-child { margin-left: 0; }
+.room-capacity-count {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.room-capacity-count svg { width: 14px; height: 14px; }
+.room-capacity-max { color: var(--ink-faint); font-weight: 600; }
+.room-capacity-pill.bump { animation: scoreBump 0.4s cubic-bezier(0.3, 1.6, 0.4, 1); }
+.room-capacity-pill { animation: chipPop 0.25s cubic-bezier(0.3, 1.4, 0.5, 1); }
+
 .member-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .member-row {
   display: flex;
@@ -530,6 +588,28 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);
+  position: relative;
+  overflow: hidden;
+  animation: memberIn 0.26s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--stagger, 0) * 0.04s);
+}
+@keyframes memberIn { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: translateX(0); } }
+
+/* A player joining mid-lobby gets a more noticeable entrance than the initial-load
+   stagger above: a spring pop-in plus a soft accent-colored sweep that fades out,
+   so a new face in the roster actually catches the eye instead of just appearing. */
+.member-row--joining {
+  animation: memberJoinPop 0.55s cubic-bezier(0.2, 1.3, 0.35, 1) both, memberJoinGlow 1.4s ease-out both;
+}
+@keyframes memberJoinPop {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.9); }
+  55%  { opacity: 1; transform: translateY(-2px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes memberJoinGlow {
+  0%   { background: var(--accent-dim); border-color: var(--accent); }
+  70%  { background: var(--accent-dim); border-color: var(--accent); }
+  100% { background: var(--surface); border-color: var(--line); }
 }
 .member-row .name { font-weight: 600; font-size: 14px; flex: 1; }
 .member-row .role-tag {
@@ -548,6 +628,9 @@ a:focus-visible {
 }
 .member-row.ready .ready-dot { background: var(--good); }
 .member-row .score-num { font-weight: 700; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) {
+  .member-row, .member-row--joining { animation: none; }
+}
 
 /* ---------- Room browse list ---------- */
 .room-browse-list { display: flex; flex-direction: column; gap: 10px; }
@@ -557,7 +640,9 @@ a:focus-visible {
   justify-content: space-between;
   gap: 14px;
   padding: 14px 16px;
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
+.room-browse-row:hover { border-color: var(--line-strong); transform: translateY(-1px); }
 .room-browse-main { flex: 1; min-width: 0; }
 .room-browse-name {
   font-weight: 700;
@@ -604,10 +689,14 @@ a:focus-visible {
   font-size: 12.5px;
   white-space: nowrap;
   border: 1px solid var(--line);
+  transition: background 0.2s ease, border-color 0.2s ease;
 }
 .timer-badge { color: var(--bad); }
-.timer-badge.warn { background: var(--bad-dim); border-color: var(--bad-dim); }
+.timer-badge.warn { background: var(--bad-dim); border-color: var(--bad-dim); animation: timerWarnPulse 1s ease-in-out infinite; }
+@keyframes timerWarnPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 .score-badge { color: var(--good); }
+.score-badge.bump { animation: scoreBump 0.4s cubic-bezier(0.3, 1.6, 0.4, 1); }
+@keyframes scoreBump { 0% { transform: scale(1); } 45% { transform: scale(1.22); } 100% { transform: scale(1); } }
 .timer-badge svg, .score-badge svg { width: 13px; height: 13px; }
 
 .question-card { padding: 28px 24px; margin-bottom: 14px; min-height: 100px; }
@@ -638,10 +727,31 @@ a:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+  animation: answerIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--stagger, 0) * 0.05s);
 }
-.answer-btn:hover:not(:disabled) { border-color: var(--ink); }
+@keyframes answerIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.answer-btn:hover:not(:disabled) { border-color: var(--ink); transform: translateY(-1px); }
+.answer-btn:active:not(:disabled) { transform: scale(0.985); }
 .answer-btn:disabled { cursor: default; }
+.answer-btn.picked { background: var(--accent-dim); border-color: var(--accent); }
+.answer-btn.picked .answer-letter { background: var(--accent); color: var(--accent-ink); }
+.answer-btn.picked .answer-check { opacity: 1; color: var(--accent); transform: scale(1); }
+.answer-btn.correct { animation: answerCorrectPop 0.32s ease; }
+.answer-btn.wrong { animation: answerWrongShake 0.32s ease; }
+@keyframes answerCorrectPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.025); }
+  100% { transform: scale(1); }
+}
+@keyframes answerWrongShake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
 .answer-letter {
   width: 22px;
   height: 22px;
@@ -654,8 +764,10 @@ a:focus-visible {
   font-weight: 800;
   color: var(--ink-soft);
   flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.answer-check { width: 16px; height: 16px; flex-shrink: 0; opacity: 0; }
+.answer-check { width: 16px; height: 16px; flex-shrink: 0; opacity: 0; transform: scale(0.5); transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.answer-btn.correct .answer-check, .answer-btn.wrong .answer-check { transform: scale(1); }
 
 .answer-btn.correct { background: var(--good-dim); border-color: var(--good); }
 .answer-btn.correct .answer-letter { background: var(--good); color: var(--surface); }
@@ -663,8 +775,6 @@ a:focus-visible {
 .answer-btn.wrong { background: var(--bad-dim); border-color: var(--bad); }
 .answer-btn.wrong .answer-letter { background: var(--bad); color: var(--surface); }
 .answer-btn.wrong .answer-check { opacity: 1; color: var(--bad); }
-.answer-btn.picked { border-color: var(--accent); background: var(--accent-dim); }
-.answer-btn.picked .answer-letter { background: var(--accent); color: var(--accent-ink); }
 
 .answered-others {
   margin-top: 12px;
@@ -716,6 +826,8 @@ a:focus-visible {
 
 /* ---------- Results ---------- */
 .result-hero { padding: 32px 26px; text-align: center; }
+.result-trophy { margin-bottom: 6px; color: var(--warn); }
+.result-trophy svg { width: 26px; height: 26px; }
 .result-ring { width: 120px; height: 120px; margin: 0 auto 18px; position: relative; }
 .result-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .result-ring-bg { stroke: var(--surface-sunken); }
@@ -736,11 +848,174 @@ a:focus-visible {
   border-radius: var(--radius-sm);
   background: var(--surface);
   border: 1px solid var(--line);
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease;
 }
+.leaderboard-row:hover { border-color: var(--line-strong); transform: translateX(2px); }
 .leaderboard-row.first { border-color: var(--ink); }
 :root[data-theme="dark"] .leaderboard-row.first { border-color: var(--accent); }
 .leaderboard-row + .leaderboard-row { margin-top: 6px; }
 .leaderboard-rank { opacity: 0.55; font-weight: 700; width: 18px; }
+
+/* ---------- Kahoot-style podium & animated leaderboard ---------- */
+.podium-wrap {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 10px;
+  margin: 8px auto 26px;
+  max-width: 380px;
+  min-height: 190px;
+}
+.podium-slot {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  opacity: 0;
+  transform: translateY(24px);
+  animation: podiumRise 0.55s cubic-bezier(0.2, 1, 0.3, 1) forwards;
+}
+.podium-slot.p1 { animation-delay: 0.5s; }
+.podium-slot.p2 { animation-delay: 0.2s; }
+.podium-slot.p3 { animation-delay: 0.05s; }
+@keyframes podiumRise { to { opacity: 1; transform: translateY(0); } }
+.podium-avatar-wrap { position: relative; margin-bottom: 8px; }
+.podium-slot .avatar { width: 46px; height: 46px; font-size: 22px; border: 2px solid var(--surface); box-shadow: var(--shadow-2); }
+.podium-slot.p1 .avatar { width: 58px; height: 58px; font-size: 28px; }
+.podium-crown { position: absolute; top: -20px; left: 50%; transform: translateX(-50%); font-size: 20px; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.25)); }
+.podium-name { font-weight: 700; font-size: 12.5px; text-align: center; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; }
+.podium-score { font-family: var(--font-score); font-weight: 700; font-size: 13px; color: var(--ink-soft); margin-bottom: 8px; }
+.podium-bar { width: 100%; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: var(--surface-sunken); border: 1px solid var(--line); border-bottom: none; display: flex; align-items: flex-start; justify-content: center; padding-top: 8px; font-weight: 800; font-size: 15px; color: var(--ink-faint); }
+.podium-slot.p1 .podium-bar { height: 92px; background: linear-gradient(180deg, var(--accent-dim), var(--surface-sunken)); border-color: var(--ink); }
+.podium-slot.p2 .podium-bar { height: 66px; }
+.podium-slot.p3 .podium-bar { height: 46px; }
+:root[data-theme="dark"] .podium-slot.p1 .podium-bar { border-color: var(--accent); }
+
+.leaderboard-row.rest-row { animation: memberIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: calc(var(--stagger, 0) * 0.06s + 0.7s); }
+.leaderboard-row .lb-delta { font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+.leaderboard-row .lb-delta.up { background: var(--good-dim); color: var(--good); }
+.leaderboard-row .lb-delta.down { background: var(--bad-dim); color: var(--bad); }
+
+.team-standings-wrap { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 20px; }
+.team-standing-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--line); background: var(--surface); }
+.team-standing-row .team-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+.team-standing-row .team-name { font-weight: 700; font-size: 14px; flex: 1; text-align: left; }
+.team-standing-row .team-score { font-family: var(--font-score); font-weight: 800; font-size: 15px; }
+.team-standing-row.leading { border-color: var(--ink); }
+:root[data-theme="dark"] .team-standing-row.leading { border-color: var(--accent); }
+.team-standing-members { font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+
+/* ---------- Team mode: lobby ---------- */
+.team-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; }
+.team-group { margin-bottom: 14px; }
+.team-group-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 0 2px; }
+.team-group-dot { width: 10px; height: 10px; border-radius: 50%; }
+.team-group-name { font-weight: 700; font-size: 13px; }
+.team-group-score { margin-left: auto; font-family: var(--font-score); font-weight: 700; font-size: 12.5px; color: var(--ink-soft); }
+.member-row .team-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #fff;
+  flex-shrink: 0;
+}
+.member-row .team-select {
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.member-row .profile-open-btn { background: none; border: none; padding: 0; cursor: pointer; display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; text-align: left; }
+.member-row .profile-open-btn .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- Chat ---------- */
+.chat-fab {
+  position: fixed;
+  right: 18px;
+  bottom: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-2);
+  cursor: pointer;
+  z-index: 40;
+}
+:root[data-theme="dark"] .chat-fab { background: var(--accent); color: var(--accent-ink); }
+.chat-fab svg { width: 22px; height: 22px; }
+.chat-fab .chat-fab-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: var(--bad);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+.chat-sheet {
+  display: flex;
+  flex-direction: column;
+  max-height: 78vh;
+  /* iOS/Android measure 100vh against the full layout viewport, not the part
+     still visible once the on-screen keyboard opens for #chatInput — so the
+     sheet (and the input inside it) could end up pushed behind the keyboard
+     or clipped. dvh tracks the actual visible viewport; vh above is the
+     fallback for browsers that don't support dvh yet. */
+  max-height: 78dvh;
+}
+.chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 10px; min-height: 200px; }
+.chat-msg { display: flex; gap: 8px; align-items: flex-start; }
+.chat-msg.mine { flex-direction: row-reverse; }
+.chat-msg .avatar { width: 28px; height: 28px; font-size: 14px; flex-shrink: 0; }
+.chat-bubble { background: var(--surface-sunken); border-radius: var(--radius-md); padding: 7px 11px; max-width: 72%; }
+.chat-msg.mine .chat-bubble { background: var(--accent); color: var(--accent-ink); }
+.chat-bubble .chat-author { font-size: 10.5px; font-weight: 700; opacity: 0.65; margin-bottom: 2px; }
+.chat-bubble .chat-body { font-size: 13.5px; line-height: 1.4; word-break: break-word; }
+.chat-input-row { display: flex; gap: 8px; align-items: center; padding-top: 8px; border-top: 1px solid var(--line); }
+.chat-input {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 13.5px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+.chat-input:focus { outline: none; border-color: var(--accent); }
+.chat-send-btn { width: 38px; height: 38px; border-radius: 50%; background: var(--ink); color: var(--paper); flex-shrink: 0; }
+:root[data-theme="dark"] .chat-send-btn { background: var(--accent); color: var(--accent-ink); }
+.chat-send-btn svg { width: 16px; height: 16px; }
+.chat-empty { text-align: center; color: var(--ink-faint); font-size: 12.5px; padding: 24px 0; }
+
+/* ---------- Profile modal ---------- */
+.profile-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.profile-head .avatar { width: 54px; height: 54px; font-size: 26px; }
+.profile-head-name { font-weight: 800; font-size: 17px; }
+.profile-head-team { font-size: 11.5px; font-weight: 700; color: #fff; padding: 2px 9px; border-radius: 999px; display: inline-block; margin-top: 4px; }
+.profile-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.profile-stat { border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px; text-align: center; }
+.profile-stat .num { font-family: var(--font-score); font-weight: 800; font-size: 19px; }
+.profile-stat .lbl { font-size: 10.5px; color: var(--ink-soft); font-weight: 600; margin-top: 2px; }
+.profile-dm-btn { width: 100%; }
 
 /* ---------- Truth or Dare ---------- */
 .tod-card { padding: 40px 26px; text-align: center; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
@@ -769,62 +1044,46 @@ a:focus-visible {
 .tod-choice-btn.dare-btn:hover { border-color: var(--bad); color: var(--bad); }
 
 /* ---------- Loading / generation ---------- */
-.gen-wrap { padding: 26px 22px; text-align: center; }
-.gen-topline {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 14px; padding: 9px 14px;
-  border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--surface);
-}
-.gen-elapsed { font-weight: 700; font-size: 15px; }
-.gen-eta { flex: 1; text-align: left; color: var(--ink-soft); font-size: 13px; }
-.gen-cancel { padding: 5px 10px; font-size: 13px; }
-/* Пока ИИ ищет вопросы, будущий экран показан размытым: и данные вопроса,
-   и подсказка темы на месте, но прочитать их нельзя. */
-.gen-preview { margin-top: 22px; filter: blur(5px); opacity: 0.5; pointer-events: none; user-select: none; }
-.gen-preview .question-card { margin-bottom: 10px; }
-.answers-grid.compact { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.answers-grid.compact .answer-btn { padding: 10px 12px; font-size: 13px; }
-.gen-loader-wrap { width: 112px; height: 112px; margin: 0 auto 18px; position: relative; display: grid; place-items: center; }
+.gen-wrap { padding: 40px 26px; text-align: center; }
+.gen-ring-wrap { width: 100px; height: 100px; margin: 0 auto 20px; position: relative; }
+.gen-ring-wrap svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.gen-ring-bg { stroke: var(--surface-sunken); }
+.gen-ring-fg { stroke: var(--ink); stroke-linecap: round; transition: stroke-dashoffset 0.3s ease; }
+:root[data-theme="dark"] .gen-ring-fg { stroke: var(--accent); }
 .gen-percent { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; }
 .gen-status { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
 .gen-sub { color: var(--ink-soft); font-size: 13px; }
+.gen-live-status {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--surface, rgba(0,0,0,0.04));
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  text-align: center;
+  transition: opacity 0.15s ease;
+}
+/* Marks a masked number/date inside a live search-query status line — the
+   raw digits are already replaced server-side, this just makes the masked
+   block visually read as "hidden" rather than as garbled text. */
+.gen-spoiler-blur {
+  display: inline-block;
+  filter: blur(2.5px);
+  user-select: none;
+  color: var(--ink-faint, currentColor);
+  letter-spacing: 1px;
+}
 
-/* ---------- Expressive loading indicator ---------- */
-.expressive-loader { display: block; overflow: visible; color: var(--ink); }
-:root[data-theme="dark"] .expressive-loader { color: var(--accent); }
-.expressive-loader--large { width: 112px; height: 112px; }
-.expressive-loader--compact { width: 34px; height: 34px; margin: 0 auto; }
-.expressive-loader--inline { width: 18px; height: 18px; flex: 0 0 18px; }
-.expressive-loader__shape-group {
-  transform-origin: 100px 100px;
-  animation: expressive-loader-turn 2.4s linear infinite, expressive-loader-breathe 2.4s ease-in-out infinite;
-}
-.expressive-loader__shape {
-  fill: currentColor;
-  animation: expressive-loader-morph 2.4s linear infinite;
-}
-.expressive-loader__drop {
-  fill: currentColor;
-  transform-box: fill-box;
-  transform-origin: 100px 100px;
-  animation: expressive-loader-drop 2.4s linear infinite;
-}
-@keyframes expressive-loader-turn { to { transform: rotate(480deg); } }
-@keyframes expressive-loader-breathe { 0%,100% { scale: 1; } 39% { scale: 1.06; } 74% { scale: .94; } }
-@keyframes expressive-loader-morph {
-  0%,100% { d: path("M100 52 C126.5 52 148 73.5 148 100 C148 126.5 126.5 148 100 148 C73.5 148 52 126.5 52 100 C52 73.5 73.5 52 100 52 Z"); }
-  25% { d: path("M60 60 C40 60 40 140 60 140 C80 140 120 140 140 140 C160 140 160 60 140 60 C120 60 80 60 60 60 Z"); }
-  50% { d: path("M100 28 C105 76 124 76 172 100 C124 105 124 124 100 172 C95 124 76 124 28 100 C76 95 76 76 100 28 Z"); }
-  75% { d: path("M62 74 C40 74 40 126 62 126 C84 126 116 126 138 126 C160 126 160 74 138 74 C116 74 84 74 62 74 Z"); }
-}
-@keyframes expressive-loader-drop {
-  0%, 28%, 88%, 100% { opacity: 0; transform: rotate(var(--drop-angle)) translateY(0) scale(0); }
-  37% { opacity: 1; transform: rotate(var(--drop-angle)) translateY(-80px) scale(1.1); }
-  44% { opacity: 1; transform: rotate(var(--drop-angle)) translateY(-70px) scale(.95); }
-  74% { opacity: 1; transform: rotate(var(--drop-angle)) translateY(-25px) scale(.8); }
-  84% { opacity: .15; transform: rotate(var(--drop-angle)) translateY(-4px) scale(.15); }
-}
+/* Baseline for every inline SVG icon in the app. Without this, an <svg> with
+   no explicit width/height falls back to the browser's replaced-element
+   default (historically ~300x150px) the moment it's dropped into a container
+   that has no dedicated "X svg { width: ...}" rule — that's the cause of the
+   oversized icons that show up in a few spots (podium trophy, answered pills).
+   Everything more specific below still wins over this on normal CSS cascade
+   rules; this only catches icons nothing else was written to size. */
+svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+.answered-pill svg { width: 12px; height: 12px; }
 
 /* ---------- Modal ---------- */
 .modal-overlay {
@@ -846,7 +1105,7 @@ a:focus-visible {
   width: 100%;
   max-width: 420px;
   border-radius: 16px 16px 0 0;
-  padding: 20px 18px 22px;
+  padding: 22px 20px 26px;
   transform: translateY(24px);
   transition: transform 0.25s ease;
   max-height: 85vh;
@@ -865,7 +1124,6 @@ a:focus-visible {
   padding: 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
-  background: var(--surface);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -878,64 +1136,35 @@ a:focus-visible {
 .theme-opt.active { border-color: var(--ink); color: var(--ink); background: var(--surface-sunken); }
 .theme-opt svg { width: 17px; height: 17px; }
 
-.settings-note {
-  margin: 0;
-  padding: 12px;
+.key-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.key-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-sunken);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--surface-sunken);
-  color: var(--ink-soft);
-  font-size: 13px;
-  line-height: 1.5;
+  padding: 3px 3px 3px 12px;
 }
+.key-slot-num {
+  width: 18px; height: 18px; border-radius: 5px;
+  background: var(--surface); color: var(--ink-soft);
+  font-size: 10px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.key-input { flex: 1; border: none; background: transparent; color: var(--ink); font-size: 13px; padding: 9px 0; outline: none; min-width: 0; }
+.key-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-right: 8px; background: transparent; }
+.key-status.filled { background: var(--ink-faint); }
+.key-status.active { background: var(--good); }
+.key-status.exhausted { background: var(--bad); }
 
 .hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
-
-.label-optional { color: var(--ink-faint); font-weight: 500; }
-.key-field { margin-top: 2px; }
-.fact-toggle {
-  width: 100%;
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  padding: 12px;
-  text-align: left;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--ink);
-  cursor: pointer;
-}
-.fact-toggle.active { border-color: var(--accent); background: var(--surface-sunken); }
-.fact-toggle-mark {
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-  margin-top: 1px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--line-dark);
-  border-radius: 50%;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-}
-.fact-toggle.active .fact-toggle-mark { border-color: var(--accent); background: var(--accent); color: var(--paper); }
-.fact-toggle strong, .fact-toggle small { display: block; }
-.fact-toggle strong { font-size: 13px; }
-.fact-toggle small { margin-top: 3px; color: var(--ink-soft); font-size: 11.5px; line-height: 1.35; }
-
-@media (prefers-reduced-motion: reduce) {
-  #appMain.page-in,
-  ::view-transition-old(root),
-  ::view-transition-new(root) { animation-duration: 0.01ms; }
-}
 
 .toast {
   position: fixed;
   bottom: 22px;
   left: 50%;
-  transform: translateX(-50%) translateY(16px);
+  transform: translateX(-50%) translateY(16px) scale(0.94);
   background: var(--ink);
   color: var(--paper);
   padding: 10px 18px;
@@ -944,27 +1173,171 @@ a:focus-visible {
   font-weight: 600;
   opacity: 0;
   pointer-events: none;
-  transition: all 0.2s ease;
+  transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.3);
   z-index: 100;
   display: flex;
   align-items: center;
   gap: 7px;
   box-shadow: var(--shadow-2);
 }
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 .toast svg { width: 15px; height: 15px; flex-shrink: 0; }
 
 .empty-state { text-align: center; padding: 40px 20px; color: var(--ink-soft); }
-.empty-state svg { width: 32px; height: 32px; color: var(--ink-faint); margin-bottom: 12px; }
+.empty-state svg { width: 22px; height: 22px; color: var(--ink-faint); margin-bottom: 12px; }
 .empty-state .title { font-weight: 700; color: var(--ink); margin-bottom: 4px; }
 .empty-state .sub { font-size: 13px; }
 
-@media (prefers-reduced-motion: reduce) {
-  .expressive-loader__shape-group { animation: none; }
-  .expressive-loader__shape { animation: expressive-loader-reduced-pulse 1.8s ease-in-out infinite; }
-  .expressive-loader__drop { display: none; }
+.home-browse-cta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
 }
-@keyframes expressive-loader-reduced-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.home-browse-cta:hover { border-color: var(--ink); transform: translateY(-1px); }
+.home-browse-cta svg { width: 18px; height: 18px; color: var(--accent); flex: 0 0 18px; }
+.home-browse-cta .sub { font-size: 13px; color: var(--ink-soft); }
+
+/* ============ LOADING INDICATOR (M3 expressive morph) ============
+   Indeterminate loader: circle -> squircle -> star -> pill -> circle,
+   with a slow rotation and a subtle breathing scale. Used for every
+   inline "busy" state (buttons, lists) and for full-screen loads.
+   Size and color are set per-instance via --loader-size / the
+   currentColor of the wrapping element, so it drops into buttons,
+   panels and overlays without extra markup. */
+.loader {
+  width: var(--loader-size, 18px);
+  height: var(--loader-size, 18px);
+  display: inline-block;
+  flex-shrink: 0;
+  vertical-align: -3px;
+}
+.loader__group {
+  transform-origin: 100px 100px;
+  animation:
+    loaderRotate 2.4s infinite linear,
+    loaderScale 2.4s infinite linear;
+}
+.loader__shape {
+  fill: currentColor;
+  animation: loaderMorph 2.4s infinite linear;
+}
+.loader__drop {
+  fill: currentColor;
+  transform-box: view-box;
+  transform-origin: 100px 100px;
+  opacity: 0;
+  animation: loaderDrop 2.4s infinite linear;
+}
+@keyframes loaderMorph {
+  0% { d: path("M 100.00,66.00 C 108.85,66.00 117.79,69.70 124.04,75.96 C 130.30,82.21 134.00,91.15 134.00,100.00 C 134.00,108.85 130.30,117.79 124.04,124.04 C 117.79,130.30 108.85,134.00 100.00,134.00 C 91.15,134.00 82.21,130.30 75.96,124.04 C 69.70,117.79 66.00,108.85 66.00,100.00 C 66.00,91.15 69.70,82.21 75.96,75.96 C 82.21,69.70 91.15,66.00 100.00,66.00 Z"); }
+  3.125% { d: path("M 100.00,60.03 C 111.37,60.03 124.42,59.50 132.46,67.54 C 140.50,75.58 139.97,88.63 139.97,100.00 C 139.97,111.37 140.50,124.42 132.46,132.46 C 124.42,140.50 111.37,139.97 100.00,139.97 C 88.63,139.97 75.58,140.50 67.54,132.46 C 59.50,124.42 60.03,111.37 60.03,100.00 C 60.03,88.63 59.50,75.58 67.54,67.54 C 75.58,59.50 88.63,60.03 100.00,60.03 Z"); }
+  6.25% { d: path("M 100.00,56.47 C 112.87,56.47 128.38,53.42 137.48,62.52 C 146.58,71.62 143.53,87.13 143.53,100.00 C 143.53,112.87 146.58,128.38 137.48,137.48 C 128.38,146.58 112.87,143.53 100.00,143.53 C 87.13,143.53 71.62,146.58 62.52,137.48 C 53.42,128.38 56.47,112.87 56.47,100.00 C 56.47,87.13 53.42,71.62 62.52,62.52 C 71.62,53.42 87.13,56.47 100.00,56.47 Z"); }
+  9.375% { d: path("M 100.00,56.65 C 112.79,56.65 128.17,53.74 137.21,62.79 C 146.26,71.83 143.35,87.21 143.35,100.00 C 143.35,112.79 146.26,128.17 137.21,137.21 C 128.17,146.26 112.79,143.35 100.00,143.35 C 87.21,143.35 71.83,146.26 62.79,137.21 C 53.74,128.17 56.65,112.79 56.65,100.00 C 56.65,87.21 53.74,71.83 62.79,62.79 C 71.83,53.74 87.21,56.65 100.00,56.65 Z"); }
+  12.5% { d: path("M 100.00,57.90 C 112.26,57.90 126.78,55.88 135.45,64.55 C 144.12,73.22 142.10,87.74 142.10,100.00 C 142.10,112.26 144.12,126.78 135.45,135.45 C 126.78,144.12 112.26,142.10 100.00,142.10 C 87.74,142.10 73.22,144.12 64.55,135.45 C 55.88,126.78 57.90,112.26 57.90,100.00 C 57.90,87.74 55.88,73.22 64.55,64.55 C 73.22,55.88 87.74,57.90 100.00,57.90 Z"); }
+  15.625% { d: path("M 100.00,58.46 C 112.03,58.46 126.17,56.82 134.67,65.33 C 143.18,73.83 141.54,87.97 141.54,100.00 C 141.54,112.03 143.18,126.17 134.67,134.67 C 126.17,143.18 112.03,141.54 100.00,141.54 C 87.97,141.54 73.83,143.18 65.33,134.67 C 56.82,126.17 58.46,112.03 58.46,100.00 C 58.46,87.97 56.82,73.83 65.33,65.33 C 73.83,56.82 87.97,58.46 100.00,58.46 Z"); }
+  18.75% { d: path("M 100.00,58.32 C 112.09,58.32 126.32,56.59 134.86,65.14 C 143.41,73.68 141.68,87.91 141.68,100.00 C 141.68,112.09 143.41,126.32 134.86,134.86 C 126.32,143.41 112.09,141.68 100.00,141.68 C 87.91,141.68 73.68,143.41 65.14,134.86 C 56.59,126.32 58.32,112.09 58.32,100.00 C 58.32,87.91 56.59,73.68 65.14,65.14 C 73.68,56.59 87.91,58.32 100.00,58.32 Z"); }
+  21.875% { d: path("M 100.00,58.08 C 112.19,58.08 126.59,56.17 135.21,64.79 C 143.83,73.41 141.92,87.81 141.92,100.00 C 141.92,112.19 143.83,126.59 135.21,135.21 C 126.59,143.83 112.19,141.92 100.00,141.92 C 87.81,141.92 73.41,143.83 64.79,135.21 C 56.17,126.59 58.08,112.19 58.08,100.00 C 58.08,87.81 56.17,73.41 64.79,64.79 C 73.41,56.17 87.81,58.08 100.00,58.08 Z"); }
+  25% { d: path("M 100.00,58.00 C 112.22,58.00 126.68,56.04 135.32,64.68 C 143.96,73.32 142.00,87.78 142.00,100.00 C 142.00,112.22 143.96,126.68 135.32,135.32 C 126.68,143.96 112.22,142.00 100.00,142.00 C 87.78,142.00 73.32,143.96 64.68,135.32 C 56.04,126.68 58.00,112.22 58.00,100.00 C 58.00,87.78 56.04,73.32 64.68,64.68 C 73.32,56.04 87.78,58.00 100.00,58.00 Z"); }
+  28.125% { d: path("M 100.00,22.16 C 112.81,22.16 121.01,60.88 130.07,69.93 C 134.13,74.00 177.84,94.26 177.84,100.00 C 177.84,112.81 139.12,121.01 130.07,130.07 C 126.00,134.13 105.74,177.84 100.00,177.84 C 87.19,177.84 78.99,139.12 69.93,130.07 C 65.87,126.00 22.16,105.74 22.16,100.00 C 22.16,87.19 60.88,78.99 69.93,69.93 C 74.00,65.87 94.26,22.16 100.00,22.16 Z"); }
+  31.25% { d: path("M 100.00,0.79 C 113.16,0.79 117.63,63.76 126.93,73.07 C 128.27,74.40 199.21,98.12 199.21,100.00 C 199.21,113.16 136.24,117.63 126.93,126.93 C 125.60,128.27 101.88,199.21 100.00,199.21 C 86.84,199.21 82.37,136.24 73.07,126.93 C 71.73,125.60 0.79,101.88 0.79,100.00 C 0.79,86.84 63.76,82.37 73.07,73.07 C 74.40,71.73 98.12,0.79 100.00,0.79 Z"); }
+  34.375% { d: path("M 100.00,1.93 C 113.14,1.93 117.81,63.61 127.10,72.90 C 128.58,74.38 198.07,97.91 198.07,100.00 C 198.07,113.14 136.39,117.81 127.10,127.10 C 125.62,128.58 102.09,198.07 100.00,198.07 C 86.86,198.07 82.19,136.39 72.90,127.10 C 71.42,125.62 1.93,102.09 1.93,100.00 C 1.93,86.86 63.61,82.19 72.90,72.90 C 74.38,71.42 97.91,1.93 100.00,1.93 Z"); }
+  37.5% { d: path("M 100.00,9.43 C 113.02,9.43 119.00,62.60 128.20,71.80 C 130.64,74.24 190.57,96.56 190.57,100.00 C 190.57,113.02 137.40,119.00 128.20,128.20 C 125.76,130.64 103.44,190.57 100.00,190.57 C 86.98,190.57 81.00,137.40 71.80,128.20 C 69.36,125.76 9.43,103.44 9.43,100.00 C 9.43,86.98 62.60,81.00 71.80,71.80 C 74.24,69.36 96.56,9.43 100.00,9.43 Z"); }
+  40.625% { d: path("M 100.00,12.74 C 112.96,12.74 119.52,62.15 128.69,71.31 C 131.54,74.17 187.26,95.96 187.26,100.00 C 187.26,112.96 137.85,119.52 128.69,128.69 C 125.83,131.54 104.04,187.26 100.00,187.26 C 87.04,187.26 80.48,137.85 71.31,128.69 C 68.46,125.83 12.74,104.04 12.74,100.00 C 12.74,87.04 62.15,80.48 71.31,71.31 C 74.17,68.46 95.96,12.74 100.00,12.74 Z"); }
+  43.75% { d: path("M 100.00,11.93 C 112.98,11.93 119.39,62.26 128.57,71.43 C 131.32,74.19 188.07,96.10 188.07,100.00 C 188.07,112.98 137.74,119.39 128.57,128.57 C 125.81,131.32 103.90,188.07 100.00,188.07 C 87.02,188.07 80.61,137.74 71.43,128.57 C 68.68,125.81 11.93,103.90 11.93,100.00 C 11.93,87.02 62.26,80.61 71.43,71.43 C 74.19,68.68 96.10,11.93 100.00,11.93 Z"); }
+  46.875% { d: path("M 100.00,10.46 C 113.00,10.46 119.16,62.46 128.35,71.65 C 130.92,74.22 189.54,96.37 189.54,100.00 C 189.54,113.00 137.54,119.16 128.35,128.35 C 125.78,130.92 103.63,189.54 100.00,189.54 C 87.00,189.54 80.84,137.54 71.65,128.35 C 69.08,125.78 10.46,103.63 10.46,100.00 C 10.46,87.00 62.46,80.84 71.65,71.65 C 74.22,69.08 96.37,10.46 100.00,10.46 Z"); }
+  50% { d: path("M 100.00,10.00 C 113.01,10.00 119.09,62.52 128.28,71.72 C 130.79,74.22 190.00,96.45 190.00,100.00 C 190.00,113.01 137.48,119.09 128.28,128.28 C 125.78,130.79 103.55,190.00 100.00,190.00 C 86.99,190.00 80.91,137.48 71.72,128.28 C 69.21,125.78 10.00,103.55 10.00,100.00 C 10.00,86.99 62.52,80.91 71.72,71.72 C 74.22,69.21 96.45,10.00 100.00,10.00 Z"); }
+  53.125% { d: path("M 100.00,53.31 C 111.08,53.31 120.01,66.48 130.04,69.96 C 140.99,72.13 166.10,88.67 166.10,100.00 C 166.10,113.72 142.69,126.18 130.04,130.04 C 121.71,131.83 108.69,146.69 100.00,146.69 C 88.92,146.69 79.99,133.52 69.96,130.04 C 59.01,127.87 33.90,111.33 33.90,100.00 C 33.90,86.28 57.31,73.82 69.96,69.96 C 78.29,68.17 91.31,53.31 100.00,53.31 Z"); }
+  56.25% { d: path("M 100.00,79.13 C 109.93,79.13 120.56,68.84 131.09,68.91 C 147.07,70.88 151.86,84.03 151.86,100.00 C 151.86,114.15 145.79,130.40 131.09,131.09 C 119.28,132.44 111.75,120.87 100.00,120.87 C 90.07,120.87 79.44,131.16 68.91,131.09 C 52.93,129.12 48.14,115.97 48.14,100.00 C 48.14,85.85 54.21,69.60 68.91,68.91 C 80.72,67.56 88.25,79.13 100.00,79.13 Z"); }
+  59.375% { d: path("M 100.00,77.75 C 109.99,77.75 120.53,68.71 131.04,68.96 C 146.75,70.95 152.62,84.28 152.62,100.00 C 152.62,114.13 145.63,130.18 131.04,131.04 C 119.41,132.41 111.58,122.25 100.00,122.25 C 90.01,122.25 79.47,131.29 68.96,131.04 C 53.25,129.05 47.38,115.72 47.38,100.00 C 47.38,85.87 54.37,69.82 68.96,68.96 C 80.59,67.59 88.42,77.75 100.00,77.75 Z"); }
+  62.5% { d: path("M 100.00,68.69 C 110.40,68.69 120.34,67.89 130.67,69.33 C 144.62,71.39 157.62,85.91 157.62,100.00 C 157.62,113.98 144.54,128.69 130.67,130.67 C 120.26,132.19 110.51,131.31 100.00,131.31 C 89.60,131.31 79.66,132.11 69.33,130.67 C 55.38,128.61 42.38,114.09 42.38,100.00 C 42.38,86.02 55.46,71.31 69.33,69.33 C 79.74,67.81 89.49,68.69 100.00,68.69 Z"); }
+  65.625% { d: path("M 100.00,64.69 C 110.58,64.69 120.26,67.52 130.51,69.49 C 143.67,71.58 159.83,86.63 159.83,100.00 C 159.83,113.91 144.06,128.04 130.51,130.51 C 120.64,132.10 110.04,135.31 100.00,135.31 C 89.42,135.31 79.74,132.48 69.49,130.51 C 56.33,128.42 40.17,113.37 40.17,100.00 C 40.17,86.09 55.94,71.96 69.49,69.49 C 79.36,67.90 89.96,64.69 100.00,64.69 Z"); }
+  68.75% { d: path("M 100.00,65.66 C 110.53,65.66 120.28,67.61 130.55,69.45 C 143.90,71.53 159.29,86.45 159.29,100.00 C 159.29,113.93 144.17,128.20 130.55,130.55 C 120.55,132.12 110.15,134.34 100.00,134.34 C 89.47,134.34 79.72,132.39 69.45,130.55 C 56.10,128.47 40.71,113.55 40.71,100.00 C 40.71,86.07 55.83,71.80 69.45,69.45 C 79.45,67.88 89.85,65.66 100.00,65.66 Z"); }
+  71.875% { d: path("M 100.00,67.44 C 110.45,67.44 120.31,67.77 130.62,69.38 C 144.32,71.45 158.31,86.13 158.31,100.00 C 158.31,113.96 144.39,128.49 130.62,130.62 C 120.38,132.16 110.36,132.56 100.00,132.56 C 89.55,132.56 79.69,132.23 69.38,130.62 C 55.68,128.55 41.69,113.87 41.69,100.00 C 41.69,86.04 55.61,71.51 69.38,69.38 C 79.62,67.84 89.64,67.44 100.00,67.44 Z"); }
+  75% { d: path("M 100.00,68.00 C 110.43,68.00 120.33,67.82 130.64,69.36 C 144.45,71.42 158.00,86.03 158.00,100.00 C 158.00,113.97 144.45,128.58 130.64,130.64 C 120.33,132.18 110.43,132.00 100.00,132.00 C 89.57,132.00 79.67,132.18 69.36,130.64 C 55.55,128.58 42.00,113.97 42.00,100.00 C 42.00,86.03 55.55,71.42 69.36,69.36 C 79.67,67.82 89.57,68.00 100.00,68.00 Z"); }
+  78.125% { d: path("M 100.00,66.51 C 109.25,66.51 118.43,69.23 125.71,74.29 C 133.88,79.48 140.08,89.86 140.08,100.00 C 140.08,110.14 133.88,120.52 125.71,125.71 C 118.43,130.77 109.25,133.49 100.00,133.49 C 90.75,133.49 81.57,130.77 74.29,125.71 C 66.12,120.52 59.92,110.14 59.92,100.00 C 59.92,89.86 66.12,79.48 74.29,74.29 C 81.57,69.23 90.75,66.51 100.00,66.51 Z"); }
+  81.25% { d: path("M 100.00,65.62 C 108.54,65.62 117.30,70.06 122.78,77.22 C 127.58,84.29 129.40,92.13 129.40,100.00 C 129.40,107.87 127.58,115.71 122.78,122.78 C 117.30,129.94 108.54,134.38 100.00,134.38 C 91.46,134.38 82.70,129.94 77.22,122.78 C 72.42,115.71 70.60,107.87 70.60,100.00 C 70.60,92.13 72.42,84.29 77.22,77.22 C 82.70,70.06 91.46,65.62 100.00,65.62 Z"); }
+  84.375% { d: path("M 100.00,65.66 C 108.58,65.66 117.36,70.02 122.93,77.07 C 127.92,84.03 129.96,92.01 129.96,100.00 C 129.96,107.99 127.92,115.97 122.93,122.93 C 117.36,129.98 108.58,134.34 100.00,134.34 C 91.42,134.34 82.64,129.98 77.07,122.93 C 72.08,115.97 70.04,107.99 70.04,100.00 C 70.04,92.01 72.08,84.03 77.07,77.07 C 82.64,70.02 91.42,65.66 100.00,65.66 Z"); }
+  87.5% { d: path("M 100.00,65.98 C 108.83,65.98 117.75,69.72 123.96,76.04 C 130.13,82.34 133.71,91.21 133.71,100.00 C 133.71,108.79 130.13,117.66 123.96,123.96 C 117.75,130.28 108.83,134.02 100.00,134.02 C 91.17,134.02 82.25,130.28 76.04,123.96 C 69.87,117.66 66.29,108.79 66.29,100.00 C 66.29,91.21 69.87,82.34 76.04,76.04 C 82.25,69.72 91.17,65.98 100.00,65.98 Z"); }
+  90.625% { d: path("M 100.00,66.11 C 108.94,66.11 117.93,69.59 124.42,75.58 C 131.11,81.60 135.37,90.86 135.37,100.00 C 135.37,109.14 131.11,118.40 124.42,124.42 C 117.93,130.41 108.94,133.89 100.00,133.89 C 91.06,133.89 82.07,130.41 75.58,124.42 C 68.89,118.40 64.63,109.14 64.63,100.00 C 64.63,90.86 68.89,81.60 75.58,75.58 C 82.07,69.59 91.06,66.11 100.00,66.11 Z"); }
+  93.75% { d: path("M 100.00,66.08 C 108.91,66.08 117.89,69.63 124.31,75.69 C 130.87,81.78 134.97,90.95 134.97,100.00 C 134.97,109.05 130.87,118.22 124.31,124.31 C 117.89,130.37 108.91,133.92 100.00,133.92 C 91.09,133.92 82.11,130.37 75.69,124.31 C 69.13,118.22 65.03,109.05 65.03,100.00 C 65.03,90.95 69.13,81.78 75.69,75.69 C 82.11,69.63 91.09,66.08 100.00,66.08 Z"); }
+  96.875% { d: path("M 100.00,66.02 C 108.86,66.02 117.81,69.68 124.11,75.89 C 130.43,82.11 134.23,91.10 134.23,100.00 C 134.23,108.90 130.43,117.89 124.11,124.11 C 117.81,130.32 108.86,133.98 100.00,133.98 C 91.14,133.98 82.19,130.32 75.89,124.11 C 69.57,117.89 65.77,108.90 65.77,100.00 C 65.77,91.10 69.57,82.11 75.89,75.89 C 82.19,69.68 91.14,66.02 100.00,66.02 Z"); }
+  100% { d: path("M 100.00,66.00 C 108.85,66.00 117.79,69.70 124.04,75.96 C 130.30,82.21 134.00,91.15 134.00,100.00 C 134.00,108.85 130.30,117.79 124.04,124.04 C 117.79,130.30 108.85,134.00 100.00,134.00 C 91.15,134.00 82.21,130.30 75.96,124.04 C 69.70,117.79 66.00,108.85 66.00,100.00 C 66.00,91.15 69.70,82.21 75.96,75.96 C 82.21,69.70 91.15,66.00 100.00,66.00 Z"); }
+}
+@keyframes loaderRotate {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(480deg); }
+}
+@keyframes loaderScale {
+  0%, 100% { scale: 1.045; }
+  25%      { scale: 0.955; }
+  50%      { scale: 1.045; }
+  75%      { scale: 0.955; }
+}
+@keyframes loaderDrop {
+  0%, 24% { opacity: 0; transform: rotate(var(--drop-angle)) translateY(0) scale(0.35); }
+  37% { opacity: 1; transform: rotate(var(--drop-angle)) translateY(-44px) scale(0.8); }
+  52% { opacity: 0.88; transform: rotate(var(--drop-angle)) translateY(-72px) scale(1); }
+  68%, 100% { opacity: 0; transform: rotate(var(--drop-angle)) translateY(-92px) scale(0.25); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .loader__group { animation: none; transform: none; }
+  .loader__shape {
+    animation: loaderPulse 1.8s ease-in-out infinite;
+    d: path("M 100,58 C 112.22,58 126.68,56.04 135.32,64.68 C 143.96,73.32 142,87.78 142,100 C 142,112.22 143.96,126.68 135.32,135.32 C 126.68,143.96 112.22,142 100,142 C 87.78,142 73.32,143.96 64.68,135.32 C 56.04,126.68 58,112.22 58,100 C 58,87.78 56.04,73.32 64.68,64.68 C 73.32,56.04 87.78,58 100,58 Z");
+  }
+  .loader__drop { display: none; }
+}
+@keyframes loaderPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* Placement variants */
+.loader--inline { color: currentColor; }
+.loader--full {
+  --loader-size: 72px;
+  color: var(--accent);
+  display: block;
+  margin: 0 auto;
+}
+.empty-state .loader--full {
+  width: var(--loader-size);
+  height: var(--loader-size);
+}
+
+/* Fact mode is a choice, not another card: it stays compact in the setup flow
+   and clearly explains what changes in the generated questions. */
+.fact-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fact-toggle:hover { border-color: var(--ink-faint); }
+.fact-toggle.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.fact-toggle-mark {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 13px;
+  font-weight: 800;
+}
+.fact-toggle.active .fact-toggle-mark { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fact-toggle strong, .fact-toggle small { display: block; }
+.fact-toggle small { margin-top: 2px; color: var(--ink-soft); font-size: 12px; font-weight: 500; }
+.label-optional { color: var(--ink-faint); font-weight: 500; }
 
 /* ============ ROUND START COUNTDOWN ============ */
 .round-start-overlay {
@@ -1043,3 +1416,111 @@ input[type="range"] {
   accent-color: var(--accent);
   height: 4px;
 }
+
+/* ============ MODAL (room password prompt) ============ */
+.room-lock-badge {
+  display: inline-flex;
+  vertical-align: middle;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-faint);
+  margin-left: 2px;
+}
+.room-lock-badge svg { width: 100%; height: 100%; }
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modalFadeIn 0.18s ease;
+}
+@keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal-card {
+  width: 100%;
+  max-width: 340px;
+  padding: 20px;
+  animation: modalPopIn 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+@keyframes modalPopIn {
+  from { opacity: 0; transform: scale(0.92) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.modal-title {
+  font-weight: 700;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.modal-title svg { width: 17px; height: 17px; }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* Compact room UI: the lobby is a working game board, not a hero screen. */
+#appMain:has(.room-code-banner) {
+  padding-top: 18px;
+  padding-bottom: 36px;
+}
+#appMain:has(.room-code-banner) .room-code-banner { padding: 12px 14px; }
+#appMain:has(.room-code-banner) .room-code-banner .code { font-size: 22px; }
+#appMain:has(.room-code-banner) .room-capacity-pill { padding: 7px 11px; margin-top: 6px; }
+#appMain:has(.room-code-banner) .member-list { gap: 5px; }
+#appMain:has(.room-code-banner) .member-row { gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); animation: none; }
+#appMain:has(.room-code-banner) .member-row--joining { animation: none; }
+#appMain:has(.room-code-banner) .section-label { margin-top: 18px; margin-bottom: 7px; }
+#appMain:has(.room-code-banner) .panel[style*="padding:14px 18px"] { padding: 9px 12px !important; }
+#appMain:has(.room-code-banner) .panel svg,
+#appMain:has(.room-code-banner) .section-label svg,
+#appMain:has(.room-code-banner) .chip svg,
+#appMain:has(.room-code-banner) button svg { width: 15px; height: 15px; }
+#appMain:has(.room-code-banner) .avatar.sm { width: 22px; height: 22px; font-size: 11px; }
+#appMain:has(.room-code-banner) .avatar.md { width: 30px; height: 30px; font-size: 14px; }
+
+/* Re-rendering the lobby happens on every realtime update. Keep the page stable
+   instead of replaying a full-screen fade and making the controls flash. */
+.view { animation: none; }
+.modal-overlay, .modal-card { animation: none; }
+.room-capacity-pill { animation: none; }
+.member-row--joining { animation: none; }
+
+/* Keep inline UI icons compact across every screen. Decorative artwork can still
+   opt into a larger size explicitly, while controls never grow unexpectedly. */
+.btn-primary svg, .btn-secondary svg, .btn-ghost svg,
+.icon-btn svg, .account-chip svg, .chip svg, .section-label svg,
+.mode-title svg, .field label svg, .room-browse-count svg,
+.room-capacity-count svg, .toast svg, .loader svg {
+  width: 16px;
+  height: 16px;
+  max-width: 16px;
+  max-height: 16px;
+  flex: 0 0 16px;
+}
+.empty-state > svg { width: 22px; height: 22px; max-width: 22px; max-height: 22px; }
+.room-lock-badge svg { width: 14px; height: 14px; }
+.modal-title svg { width: 16px; height: 16px; }
+
+/* Общий block in the room lobby: compact information strip matching the lobby
+   surfaces instead of a second oversized hero section. */
+.lobby-general-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 12px;
+}
+.lobby-general-item { min-width: 0; }
+.lobby-general-item .label { color: var(--ink-faint); font-size: 11px; margin-bottom: 3px; }
+.lobby-general-item .value { font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lobby-general-item.full { grid-column: 1 / -1; }
+.lobby-general-item.full .value { white-space: normal; overflow: visible; text-overflow: clip; }
+@media (max-width: 480px) { .lobby-general-panel { grid-template-columns: 1fr 1fr; } }

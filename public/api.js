@@ -17,10 +17,9 @@ const Api = (() => {
 
     let res;
     try {
-      res = await fetch(API_BASE + path, { ...opts, headers, signal: AbortSignal.timeout(30000) });
+      res = await fetch(API_BASE + path, { ...opts, headers });
     } catch (e) {
-      // network failure or a request that never came back — both look the same to the user
-      const err = new Error(e && e.name === 'TimeoutError' ? 'timeout' : 'network');
+      const err = new Error('network');
       err.network = true;
       throw err;
     }
@@ -44,8 +43,6 @@ const Api = (() => {
   return {
     getToken,
     setToken,
-
-    health: () => request('/api/health'),
 
     register: (username, password, displayName) =>
       request('/api/auth/register', { method: 'POST', body: JSON.stringify({ username, password, displayName }) }),
@@ -79,8 +76,9 @@ const Api = (() => {
 
     browseRooms: () => request('/api/rooms'),
 
-    joinRoom: (code) => request('/api/rooms/' + encodeURIComponent(code) + '/join', { method: 'POST' }),
+    joinRoom: (code, password) => request('/api/rooms/' + encodeURIComponent(code) + '/join', { method: 'POST', body: JSON.stringify({ password: password || '' }) }),
     renameRoom: (code, name) => request('/api/rooms/' + encodeURIComponent(code), { method: 'PATCH', body: JSON.stringify({ name }) }),
+    updateRoom: (code, patch) => request('/api/rooms/' + encodeURIComponent(code), { method: 'PATCH', body: JSON.stringify(patch) }),
 
     avatarFullUrl: (path) => (path ? API_BASE + path : null),
   };

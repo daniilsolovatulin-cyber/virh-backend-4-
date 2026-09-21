@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="styles.css?v=20260921-12">
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
@@ -16,37 +16,37 @@
   <div id="appMain"></div>
 </div>
 
-<div class="modal-overlay" id="settingsOverlay" aria-hidden="true">
-  <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" tabindex="-1">
+<div class="modal-overlay" id="settingsOverlay">
+  <div class="modal-sheet">
     <div class="modal-head">
-      <h3 id="settingsTitle">Оформление</h3>
-      <button class="icon-btn" id="closeSettings" type="button" aria-label="Закрыть настройки">
+      <h3>Оформление</h3>
+      <button class="icon-btn" id="closeSettings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
     <div class="theme-row" id="themeRow">
-      <button class="theme-opt" data-theme-choice="light" type="button">
+      <div class="theme-opt" data-theme-choice="light">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
         Светлая
-      </button>
-      <button class="theme-opt" data-theme-choice="dark" type="button">
+      </div>
+      <div class="theme-opt" data-theme-choice="dark">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
         Тёмная
-      </button>
-      <button class="theme-opt" data-theme-choice="auto" type="button">
+      </div>
+      <div class="theme-opt" data-theme-choice="auto">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
         Системная
-      </button>
+      </div>
     </div>
-    <p class="settings-note">Вопросы уже включены: сервис использует защищённый ключ на сервере. Ничего вставлять и настраивать не нужно.</p>
+    <div class="hint" style="margin:0;">Вопросы генерируются защищённо на сервере. При необходимости личный ключ можно временно указать в настройке одиночной игры.</div>
   </div>
 </div>
 
-<div class="modal-overlay" id="leaveRoomOverlay" aria-hidden="true">
-  <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="leaveRoomTitle" tabindex="-1">
+<div class="modal-overlay" id="leaveRoomOverlay">
+  <div class="modal-sheet">
     <div class="modal-head">
       <h3 id="leaveRoomTitle">Выйти из лобби?</h3>
-      <button class="icon-btn" id="closeLeaveRoomModal" type="button" aria-label="Закрыть диалог">
+      <button class="icon-btn" id="closeLeaveRoomModal">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
       </button>
     </div>
@@ -58,12 +58,41 @@
   </div>
 </div>
 
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="modal-overlay" id="profileOverlay">
+  <div class="modal-sheet" id="profileSheet">
+    <div class="modal-head">
+      <h3>Профиль игрока</h3>
+      <button class="icon-btn" id="closeProfileModal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="profileBody"></div>
+  </div>
+</div>
 
-<script src="config.js?v=20260921-12"></script>
-<script src="icons.js?v=20260921-12"></script>
-<script src="api.js?v=20260921-12"></script>
-<script src="sound.js?v=20260921-12"></script>
-<script src="app.js?v=20260921-12"></script>
+<div class="modal-overlay" id="chatOverlay">
+  <div class="modal-sheet chat-sheet" id="chatSheet">
+    <div class="modal-head">
+      <h3 id="chatTitle">Чат лобби</h3>
+      <button class="icon-btn" id="closeChatModal">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="chip-row" id="chatTabs" style="margin-bottom:10px;"></div>
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" class="chat-input" placeholder="Написать сообщение..." maxlength="500" autocomplete="off">
+      <button class="icon-btn chat-send-btn" id="chatSendBtn"></button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="config.js?v=20260921-1"></script>
+<script src="icons.js?v=20260921-1"></script>
+<script src="api.js?v=20260921-1"></script>
+<script src="sound.js?v=20260921-1"></script>
+<script src="app.js?v=20260921-1"></script>
 </body>
 </html>
