@@ -123,6 +123,20 @@ async function webSearch(query, maxResults = 4) {
   }
 }
 
+// Do the live lookup on the server, then give the compact results to the model
+// as ordinary context. Groq's tool-call mode can stall on the free service;
+// this keeps the same current-data grounding without making the player wait
+// for a multi-turn tool conversation.
+async function getSourceContext(topic, onStep) {
+  onStep?.({ type: 'web_search', query: maskSpoilerNumbers(topic) });
+  const result = await webSearch(topic, 4);
+  onStep?.({ type: 'web_search_done', query: maskSpoilerNumbers(topic), count: result.results?.length || 0, ok: result.ok });
+  if (!result.ok || !result.results?.length) return '';
+  return result.results
+    .map((item, index) => `Источник ${index + 1}: ${compactText(item.title, 120)} — ${compactText(item.snippet, 260)}`)
+    .join('\n');
+}
+
 async function webFetch(url, maxChars = 1600) {
   const target = String(url || '').trim();
   if (!/^https?:\/\//i.test(target)) return { ok: false, error: 'invalid_url', text: '' };
@@ -370,6 +384,7 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
   let all = [];
   let provisional = [];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
+  const sourceContext = await getSourceContext(topic, onStep);
   const exactFactsRule = exactFacts
     ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. Для каждого такого факта сначала используй web_search, а при сомнении web_fetch. Не добавляй вопрос, если точное число нельзя подтвердить источником.'
     : '';
@@ -384,11 +399,12 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
-    const sys = `Ты генератор вопросов для викторины. Сегодня 2026 год, и у тебя есть доступ к живому вебу через web_search и web_fetch — используй их, если тема требует актуальных на 2026 год фактов, точных цифр, дат, составов, версий или другой информации, в которой ты не уверен на 100% по памяти. Не изобретай факты, которые проще проверить одним поиском.
+    const sys = `Ты генератор вопросов для викторины. Сегодня 2026 год. Не изобретай факты, точные цифры, даты, составы, версии или статистику.
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
-КРИТИЧЕСКИ ВАЖНО: используй только реальные, проверяемые факты, при необходимости — сверенные через web_search/web_fetch. Если не уверен в точной цифре, дате, статистике или имени даже после проверки — не придумывай их и не включай такой вопрос. Не выдумывай данные, которых нет в реальности (несуществующие матчи, трансферы, рекорды, персонажей, игровые предметы и т.п. — если тема про конкретную игру, используй только то, что реально существует в этой игре).${exactFactsRule}`;
+КРИТИЧЕСКИ ВАЖНО: используй только реальные, проверяемые факты. Если не уверен в точной цифре, дате, статистике или имени — не придумывай их и не включай такой вопрос. Не выдумывай данные, которых нет в реальности (несуществующие матчи, трансферы, рекорды, персонажей, игровые предметы и т.п. — если тема про конкретную игру, используй только то, что реально существует в этой игре).${exactFactsRule}
+${sourceContext ? `\nСвежие выдержки серверного поиска — используй их как приоритетный источник, но не копируй ссылки в вопросы:\n${sourceContext}` : ''}`;
 
     const userMsg = `Сгенерируй ${askFor} новых вопросов по теме "${topic}" на языке ${language}. Не повторяй уже использованные формулировки: ${all
       .map((q) => q.question)
@@ -404,7 +420,7 @@ correct — индекс правильного варианта (0-3). Вопр
         ],
         true,
         overrideKeys,
-        true, // web tools on — lets it verify names/dates/stats for the topic before writing
+        false,
         onStep
       );
     } catch (e) {
@@ -441,8 +457,10 @@ correct — индекс правильного варианта (0-3). Вопр
       })
     );
 
-    const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep);
-    all = all.concat(factChecked);
+    // The batch was grounded by the server-side search above. Avoid a second
+    // full model request here: on the free instance it is what made a normal
+    // generation end as a 503 before any questions reached the player.
+    all = all.concat(shapeValid);
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
