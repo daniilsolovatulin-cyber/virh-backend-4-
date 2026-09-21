@@ -13,7 +13,14 @@ function restoreSnapshot() {
     return false;
   }
   try {
-    const out = cp.execFileSync('curl', ['-sS', '--max-time', '15', SUPA_URL + '/rest/v1/vihr_state?id=eq.1&select=payload', '-H', 'apikey: ' + SUPA_KEY, '-H', 'Authorization: Bearer ' + SUPA_KEY], { encoding: 'utf8' });
+    // The base64-encoded SQLite snapshot can exceed Node's 1 MB default
+    // exec buffer. Without this, a healthy Supabase row looks like a failed
+    // restore and the free Render instance starts with an empty database.
+    const out = cp.execFileSync(
+      'curl',
+      ['-sS', '--max-time', '30', SUPA_URL + '/rest/v1/vihr_state?id=eq.1&select=payload', '-H', 'apikey: ' + SUPA_KEY, '-H', 'Authorization: Bearer ' + SUPA_KEY],
+      { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
+    );
     const rows = JSON.parse(out || '[]');
     if (!rows[0] || !rows[0].payload) {
       console.warn('Supabase snapshot restore skipped: no snapshot row found');
