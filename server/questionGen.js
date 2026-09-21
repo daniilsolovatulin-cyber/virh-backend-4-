@@ -284,6 +284,16 @@ async function callGroqWithToolsForKey(key, initialMessages, jsonMode, useWebToo
   // Either web tools are off, or the model kept calling tools past the cap —
   // close it out with one plain call that has no tools offered, so jsonMode
   // (if requested) can actually be enforced via response_format here.
+  // gpt-oss may try one more tool call after receiving a result. On that
+  // closing turn tools are intentionally removed so JSON mode is reliable;
+  // explicitly tell the model to use the evidence already collected instead
+  // of asking Groq to parse an unsupported extra tool call.
+  if (useWebTools) {
+    messages.push({
+      role: 'system',
+      content: 'Веб-поиск завершён. Инструменты больше недоступны. Используй только уже полученные результаты поиска и сформируй финальный ответ строго в запрошенном JSON-формате. Не вызывай инструменты и не описывай ход работы.',
+    });
+  }
   const final = await callGroqWithKey(key, messages, jsonMode, false);
   return final.content;
 }
