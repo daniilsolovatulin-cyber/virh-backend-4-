@@ -132,6 +132,7 @@ const check = (name, cond, extra) => {
   render();
   render();
   check('шапка не пересоздаётся без изменений (нет мелькания)', header._writes === writesAfterFirst, { writes: header._writes });
+  check('текущий экран не перелистывается повторно', !mainEl.classList.contains('page-in'));
 
   state.view = 'home';
   render();
@@ -142,7 +143,7 @@ const check = (name, cond, extra) => {
   state.view = 'home';
   render();
   check('возврат помечен как back', document.documentElement.dataset.nav === 'back');
-  check('запасная анимация страницы применена', mainEl.classList.contains('page-in'));
+  check('запасная анимация страницы применена только при переходе', mainEl.classList.contains('page-in'));
 
   // браузер с View Transitions: анимацию листает сам браузер
   let vtUsed = false;

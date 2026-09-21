@@ -274,10 +274,15 @@ const VIEW_DEPTH = {
 };
 let navDepth = 0;
 let transitionRunning = false;
+let renderedView = null;
 
 function render() {
   const headerEl = document.getElementById('appHeader');
   const main = document.getElementById('appMain');
+  // A timer tick, an answer, or a health check may re-render the same screen.
+  // It must not look like the player navigated away and back again.
+  const viewChanged = state.view !== renderedView;
+  renderedView = state.view;
 
   const depth = VIEW_DEPTH[state.view] || 0;
   const goingBack = depth < navDepth;
@@ -299,7 +304,7 @@ function render() {
   };
 
   // View Transitions даёт настоящее «перелистывание» целой страницы без вспышки.
-  if (typeof document.startViewTransition === 'function' && !transitionRunning) {
+  if (viewChanged && typeof document.startViewTransition === 'function' && !transitionRunning) {
     transitionRunning = true;
     const done = () => { transitionRunning = false; };
     document.startViewTransition(swap).finished.then(done, done);
@@ -309,8 +314,10 @@ function render() {
   swap();
   // Запасной вариант для браузеров без View Transitions.
   main.classList.remove('page-in');
-  void main.offsetWidth; // перезапуск анимации
-  main.classList.add('page-in');
+  if (viewChanged) {
+    void main.offsetWidth; // перезапуск анимации
+    main.classList.add('page-in');
+  }
 }
 
 function enhanceInteractiveElements() {
