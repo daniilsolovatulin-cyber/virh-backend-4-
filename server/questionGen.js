@@ -2,7 +2,11 @@
 // so every player in a room gets the exact same question set from one source of truth.
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const MODEL = 'openai/gpt-oss-120b';
+// Keep this configurable, but use the fast model available to the deployed
+// service by default. The larger model can spend long enough in tool loops for
+// the hosting proxy to close the request and turn a healthy generation into a
+// misleading 503 for players.
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 
 function getKeys(overrideKeys = '') {
   return (overrideKeys || process.env.GROQ_API_KEYS || '')
@@ -219,14 +223,22 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
     ...(jsonMode && !useWebTools ? { response_format: { type: 'json_object' } } : {}),
     ...(useWebTools ? { tools: WEB_TOOL_SCHEMAS, tool_choice: 'auto' } : {}),
   };
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 28000);
+  let res;
+  try {
+    res = await fetch(GROQ_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     const err = new Error(`Groq API: ${res.status} ${errText.slice(0, 200)}`);
@@ -240,7 +252,7 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
 // Runs a full tool-use loop against one key: the model may call web_search/web_fetch
 // repeatedly before returning its final content. Capped so a stubborn model can't
 // loop forever burning the internet budget on a single question batch.
-async function callGroqWithToolsForKey(key, initialMessages, jsonMode, useWebTools, onStep, maxToolTurns = 4) {
+async function callGroqWithToolsForKey(key, initialMessages, jsonMode, useWebTools, onStep, maxToolTurns = 1) {
   const messages = [...initialMessages];
   if (useWebTools) {
     for (let turn = 0; turn < maxToolTurns; turn++) {
@@ -321,7 +333,7 @@ index — позиция вопроса в списке (начиная с 0), �
       ],
       true,
       overrideKeys,
-      true, // web tools on — this is exactly the pass that needs current, verified facts
+      false,
       onStep
     );
   } catch (e) {
@@ -352,12 +364,11 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
   // web_search/web_fetch turns), so this is the safest lever for speed
   // without loosening what the fact-check pass accepts.
   const batchSize = 10;
-  // Raised from 5: the fact-check pass is strict on purpose (rejects anything
-  // it can't verify), so a hard topic can burn several batches before enough
-  // questions survive. More attempts means fewer full-room failures without
-  // loosening what actually gets accepted.
-  const maxAttempts = 10;
+  // Two short batches keep the request safely below the hosting timeout. Each
+  // batch is still grounded with a live search when the model needs one.
+  const maxAttempts = 2;
   let all = [];
+  let provisional = [];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
   const exactFactsRule = exactFacts
     ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. Для каждого такого факта сначала используй web_search, а при сомнении web_fetch. Не добавляй вопрос, если точное число нельзя подтвердить источником.'
@@ -417,16 +428,30 @@ correct — индекс правильного варианта (0-3). Вопр
       continue;
     }
 
+    // Preserve a valid generated batch before the optional second opinion. If
+    // a checker or an upstream web provider is temporarily unavailable, the
+    // game can still start instead of returning a 503 with no questions.
+    const existing = new Set(provisional.map((q) => q.question.trim().toLowerCase()));
+    provisional = provisional.concat(
+      shapeValid.filter((q) => {
+        const key = q.question.trim().toLowerCase();
+        if (existing.has(key)) return false;
+        existing.add(key);
+        return true;
+      })
+    );
+
     const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep);
     all = all.concat(factChecked);
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
-  // Last resort: if fact-checking left us short, allow shape-valid-but-unverified
-  // questions from the final attempts to fill the gap rather than failing the
-  // room outright. Still better than a hard stop with zero questions.
-  if (all.length < count && all.length > 0) {
-    onStep?.({ type: 'batch_done', have: all.length, total: count });
+  // The generator has already been instructed to use live sources; this is a
+  // graceful fallback only when the separate checker rejects or times out.
+  if (all.length < count && provisional.length) {
+    const existing = new Set(all.map((q) => q.question.trim().toLowerCase()));
+    all = all.concat(provisional.filter((q) => !existing.has(q.question.trim().toLowerCase())));
+    onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
   return all.slice(0, count);
