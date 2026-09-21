@@ -316,6 +316,36 @@ function extractJson(raw) {
   return JSON.parse(cleaned);
 }
 
+function fallbackQuestions(topic, count, sourceContext) {
+  const safeTopic = String(topic || 'этой темы').replace(/[<>]/g, '').slice(0, 80);
+  const years = [...new Set((String(sourceContext || '').match(/\b(?:1[5-9]\d{2}|20\d{2})\b/g) || []))];
+  const titleMatches = [...String(sourceContext || '').matchAll(/Источник \d+: ([^—\n]{3,120})/g)].map((m) => m[1].trim());
+  const questions = [];
+
+  for (let i = 0; i < count; i++) {
+    if (years.length) {
+      const answer = years[i % years.length];
+      const number = Number(answer);
+      const distractors = [number - 1, number + 1, number + 10]
+        .filter((value) => value > 0 && String(value) !== answer)
+        .map(String);
+      questions.push({
+        question: `Какой год упоминается в найденных материалах по теме «${safeTopic}»?`,
+        options: [answer, ...distractors].slice(0, 4),
+        correct: 0,
+      });
+      continue;
+    }
+    const answer = titleMatches[i % titleMatches.length] || safeTopic;
+    questions.push({
+      question: `Что напрямую относится к теме «${safeTopic}»?`,
+      options: [answer, 'Случайный факт из другой области', 'Несвязанное событие', 'Вымышленный вариант'],
+      correct: 0,
+    });
+  }
+  return questions;
+}
+
 // Second pass: ask the model to fact-check its own batch of questions against the topic.
 // This catches the case where generation invents plausible-sounding but nonexistent facts
 // (e.g. a football player's transfer fee, a match score, a release date) rather than only
@@ -426,6 +456,10 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
     } catch (e) {
       // One bad call (rate limit blip, transient network) shouldn't fail the
       // whole room — try the next attempt instead of giving up immediately.
+      console.error('[question-generation] upstream request failed', {
+        status: e?.status || null,
+        message: String(e?.message || e).slice(0, 240),
+      });
       onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
       continue;
     }
@@ -470,6 +504,13 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
     const existing = new Set(all.map((q) => q.question.trim().toLowerCase()));
     all = all.concat(provisional.filter((q) => !existing.has(q.question.trim().toLowerCase())));
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
+  }
+
+  // The game must remain playable when the upstream model rejects a request
+  // or is briefly unavailable. Use only server-found material when possible,
+  // and never send players back a generic 503 for a recoverable outage.
+  if (!all.length) {
+    all = fallbackQuestions(topic, count, sourceContext);
   }
 
   return all.slice(0, count);
