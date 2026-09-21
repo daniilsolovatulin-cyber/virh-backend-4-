@@ -2,11 +2,9 @@
 // so every player in a room gets the exact same question set from one source of truth.
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
-// Keep this configurable, but use the fast model available to the deployed
-// service by default. The larger model can spend long enough in tool loops for
-// the hosting proxy to close the request and turn a healthy generation into a
-// misleading 503 for players.
-const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+// The full reasoning model is used by default. It may be overridden only on
+// the server, never by the browser or a player.
+const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 function getKeys(overrideKeys = '') {
   return (overrideKeys || process.env.GROQ_API_KEYS || '')
@@ -429,7 +427,7 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
-    const sys = `Ты генератор вопросов для викторины. Сегодня 2026 год. Не изобретай факты, точные цифры, даты, составы, версии или статистику.
+    const sys = `Ты генератор вопросов для викторины. Сегодня 2026 год, и у тебя есть доступ к живому вебу через web_search и web_fetch. Используй поиск для свежих данных, точных цифр, дат, составов, версий, результатов и любой информации, в которой нельзя быть уверенным по памяти. Не изобретай факты.
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
@@ -450,7 +448,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
         ],
         true,
         overrideKeys,
-        false,
+        true,
         onStep
       );
     } catch (e) {
