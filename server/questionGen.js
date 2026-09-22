@@ -280,76 +280,64 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
   return data.choices[0].message;
 }
 
-// Runs a full tool-use loop against one key: the model may call web_search/web_fetch
-// repeatedly before returning its final content. Capped so a stubborn model can't
-// loop forever burning the internet budget on a single question batch.
-async function callGroqWithToolsForKey(key, initialMessages, jsonMode, useWebTools, onStep, maxToolTurns = 1) {
-  const messages = [...initialMessages];
-  if (useWebTools) {
-    for (let turn = 0; turn < maxToolTurns; turn++) {
-      // Tool-bearing turns never force json_object (see callGroqWithKey) — that's
-      // what lets the model actually emit tool_calls instead of being locked into JSON.
-      const message = await callGroqWithKey(key, messages, jsonMode, true);
-      if (!message.tool_calls || !message.tool_calls.length) {
-        return message.content;
-      }
-      messages.push({ role: 'assistant', content: message.content || null, tool_calls: message.tool_calls });
-      for (const call of message.tool_calls) {
-        const result = await runToolCall(call, onStep);
-        messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
-      }
-    }
-  }
-  // Either web tools are off, or the model kept calling tools past the cap —
-  // close it out with one plain call that has no tools offered, so jsonMode
-  // (if requested) can actually be enforced via response_format here.
-  // gpt-oss may try one more tool call after receiving a result. On that
-  // closing turn tools are intentionally removed so JSON mode is reliable;
-  // explicitly tell the model to use the evidence already collected instead
-  // of asking Groq to parse an unsupported extra tool call.
-  if (useWebTools) {
-    messages.push({
-      role: 'system',
-      content: 'Веб-поиск завершён. Инструменты больше недоступны. Используй только уже полученные результаты поиска и сформируй финальный ответ строго в запрошенном JSON-формате. Не вызывай инструменты и не описывай ход работы.',
-    });
-  }
-  const final = await callGroqWithKey(key, messages, jsonMode, false);
-  return final.content;
-}
-
+// Run live web tools over multiple model turns. Retries happen per turn so rate
+// limits do not discard completed searches or page reads.
 async function callGroq(messages, jsonMode, overrideKeys = '', useWebTools = false, onStep = null) {
   const keys = getKeys(overrideKeys);
   if (!keys.length) throw new Error('no_server_keys_configured');
-
-  let lastErr = null;
+  const history = [...messages];
+  const evidence = [];
+  const maxToolTurns = 6;
+  let toolTurns = 0;
   let retryAttempt = 0;
+
   while (true) {
+    let message = null;
+    let lastErr = null;
     let rateLimited = null;
-    for (let i = 0; i < keys.length; i++) {
+    for (const key of keys) {
       try {
-        return await callGroqWithToolsForKey(keys[i], messages, jsonMode, useWebTools, onStep);
+        message = await callGroqWithKey(key, history, jsonMode, useWebTools && toolTurns < maxToolTurns);
+        break;
       } catch (err) {
         lastErr = err;
         if (err.status === 429 || err.status >= 500 || !err.status) {
-          rateLimited = rateLimited && (rateLimited.retryAfterMs || 0) > (err.retryAfterMs || 0) ? rateLimited : err;
+          if (!rateLimited || (err.retryAfterMs || 0) > (rateLimited.retryAfterMs || 0)) rateLimited = err;
           continue;
         }
         if (err.status === 401 || err.status === 403) continue;
         throw err;
       }
     }
+    if (!message) {
+      if (!rateLimited) throw lastErr || new Error('all_keys_failed');
+      const delayMs = Math.max(rateLimited.retryAfterMs || 0, Math.min(60000, 5000 * (2 ** Math.min(retryAttempt, 4))));
+      retryAttempt++;
+      onStep?.({ type: 'rate_limit_wait', seconds: Math.ceil(delayMs / 1000), attempt: retryAttempt });
+      await sleep(delayMs);
+      continue;
+    }
+    if (!useWebTools || !message.tool_calls?.length) return message.content;
 
-    if (!rateLimited) throw lastErr || new Error('all_keys_failed');
-
-    // Groq rate limits reset on their own. Keep this generation alive and wait
-    // for the provider's retry window instead of returning template questions.
-    const delayMs = Math.max(rateLimited.retryAfterMs || 0, Math.min(60000, 5000 * (2 ** Math.min(retryAttempt, 4))));
-    retryAttempt++;
-    onStep?.({ type: 'rate_limit_wait', seconds: Math.ceil(delayMs / 1000), attempt: retryAttempt });
-    await sleep(delayMs);
+    history.push({ role: 'assistant', content: message.content || null, tool_calls: message.tool_calls });
+    for (const call of message.tool_calls) {
+      const result = await runToolCall(call, onStep);
+      const serialized = JSON.stringify(result);
+      evidence.push(`${call.function?.name || 'web'}: ${serialized}`);
+      history.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: serialized });
+    }
+    toolTurns++;
+    if (toolTurns >= maxToolTurns) {
+      // Close with a clean JSON-mode request, carrying sources as context rather
+      // than an unfinished tool-call transcript.
+      const finalMessages = [
+        ...messages,
+        { role: 'system', content: `Поиск завершён. Используй найденные источники ниже и сформируй финальный ответ строго в запрошенном формате.\n${evidence.join('\n').slice(0, 14000)}` },
+      ];
+      return callGroq(finalMessages, jsonMode, overrideKeys, false, onStep);
+    }
   }
 }
-
 function extractJson(raw) {
   let cleaned = raw.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
   const start = cleaned.indexOf('{');
@@ -390,7 +378,7 @@ index — позиция вопроса в списке (начиная с 0), �
       ],
       true,
       overrideKeys,
-      false,
+      true,
       onStep
     );
   } catch (e) {
@@ -439,7 +427,7 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
-    const sys = `Ты генератор вопросов для викторины. Сервер уже выполнил поиск по теме и передал тебе найденные материалы. Инструменты поиска сейчас недоступны; используй приложенные выдержки как источник для точных дат, цифр и актуальных сведений. Если материалов недостаточно, выбирай надёжные общеизвестные факты и не выдумывай.
+    const sys = `Ты генератор вопросов для викторины. Сервер уже выполнил поиск по теме и передал тебе найденные материалы. У тебя есть инструменты web_search и web_fetch для поиска в интернете и проверки источников. Ищи актуальные и точные факты, открывай страницы источников при необходимости; не выдумывай. Если материалов недостаточно, выбирай надёжные общеизвестные факты и не выдумывай.
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
@@ -460,7 +448,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
         ],
         true,
         overrideKeys,
-        false,
+        true,
         onStep
       );
     } catch (e) {
