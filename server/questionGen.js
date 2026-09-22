@@ -24,6 +24,24 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function providerRetryDelayMs(headers, fallbackMs) {
+  const retryAfter = headers.get('retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return Math.max(1000, seconds * 1000);
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) return Math.max(1000, dateMs - Date.now());
+  }
+  const reset = headers.get('x-ratelimit-reset-tokens') || '';
+  const match = reset.match(/([\d.]+)\s*(ms|s|m)?/i);
+  if (match) {
+    const amount = Number(match[1]);
+    const unit = (match[2] || 's').toLowerCase();
+    if (Number.isFinite(amount)) return Math.max(1000, amount * (unit === 'm' ? 60000 : unit === 'ms' ? 1 : 1000));
+  }
+  return fallbackMs;
+}
+
 /* ---------------- Web access tools (real internet access for the model) ----------------
  * Same no-API-key approach as the client-side LiquidSheet assistant: DuckDuckGo's
  * HTML endpoint first, r.jina.ai as a CORS/anti-block proxy fallback, then DDG's
@@ -236,7 +254,7 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
     ...(useWebTools ? { tools: WEB_TOOL_SCHEMAS, tool_choice: 'auto' } : {}),
   };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 28000);
+  const timer = setTimeout(() => controller.abort(), 120000);
   let res;
   try {
     res = await fetch(GROQ_URL, {
@@ -255,6 +273,7 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
     const errText = await res.text().catch(() => '');
     const err = new Error(`Groq API: ${res.status} ${errText.slice(0, 200)}`);
     err.status = res.status;
+    if (res.status === 429) err.retryAfterMs = providerRetryDelayMs(res.headers, 5000);
     throw err;
   }
   const data = await res.json();
@@ -303,16 +322,32 @@ async function callGroq(messages, jsonMode, overrideKeys = '', useWebTools = fal
   if (!keys.length) throw new Error('no_server_keys_configured');
 
   let lastErr = null;
-  for (let i = 0; i < keys.length; i++) {
-    try {
-      return await callGroqWithToolsForKey(keys[i], messages, jsonMode, useWebTools, onStep);
-    } catch (err) {
-      lastErr = err;
-      if (err.status === 429 || err.status === 401 || err.status === 403) continue;
-      await sleep(400);
+  let retryAttempt = 0;
+  while (true) {
+    let rateLimited = null;
+    for (let i = 0; i < keys.length; i++) {
+      try {
+        return await callGroqWithToolsForKey(keys[i], messages, jsonMode, useWebTools, onStep);
+      } catch (err) {
+        lastErr = err;
+        if (err.status === 429 || err.status >= 500 || !err.status) {
+          rateLimited = rateLimited && (rateLimited.retryAfterMs || 0) > (err.retryAfterMs || 0) ? rateLimited : err;
+          continue;
+        }
+        if (err.status === 401 || err.status === 403) continue;
+        throw err;
+      }
     }
+
+    if (!rateLimited) throw lastErr || new Error('all_keys_failed');
+
+    // Groq rate limits reset on their own. Keep this generation alive and wait
+    // for the provider's retry window instead of returning template questions.
+    const delayMs = Math.max(rateLimited.retryAfterMs || 0, Math.min(60000, 5000 * (2 ** Math.min(retryAttempt, 4))));
+    retryAttempt++;
+    onStep?.({ type: 'rate_limit_wait', seconds: Math.ceil(delayMs / 1000), attempt: retryAttempt });
+    await sleep(delayMs);
   }
-  throw lastErr || new Error('all_keys_failed');
 }
 
 function extractJson(raw) {
@@ -322,36 +357,6 @@ function extractJson(raw) {
   let s = start === -1 ? startArr : startArr === -1 ? start : Math.min(start, startArr);
   if (s > 0) cleaned = cleaned.slice(s);
   return JSON.parse(cleaned);
-}
-
-function fallbackQuestions(topic, count, sourceContext) {
-  const safeTopic = String(topic || 'этой темы').replace(/[<>]/g, '').slice(0, 80);
-  const years = [...new Set((String(sourceContext || '').match(/\b(?:1[5-9]\d{2}|20\d{2})\b/g) || []))];
-  const titleMatches = [...String(sourceContext || '').matchAll(/Источник \d+: ([^—\n]{3,120})/g)].map((m) => m[1].trim());
-  const questions = [];
-
-  for (let i = 0; i < count; i++) {
-    if (years.length) {
-      const answer = years[i % years.length];
-      const number = Number(answer);
-      const distractors = [number - 1, number + 1, number + 10]
-        .filter((value) => value > 0 && String(value) !== answer)
-        .map(String);
-      questions.push({
-        question: `Какой год упоминается в найденных материалах по теме «${safeTopic}»?`,
-        options: [answer, ...distractors].slice(0, 4),
-        correct: 0,
-      });
-      continue;
-    }
-    const answer = titleMatches[i % titleMatches.length] || safeTopic;
-    questions.push({
-      question: `Что напрямую относится к теме «${safeTopic}»?`,
-      options: [answer, 'Случайный факт из другой области', 'Несвязанное событие', 'Вымышленный вариант'],
-      correct: 0,
-    });
-  }
-  return questions;
 }
 
 // Second pass: ask the model to fact-check its own batch of questions against the topic.
@@ -411,23 +416,19 @@ index — позиция вопроса в списке (начиная с 0), �
 }
 
 async function generateQuestions(topic, language, count, ageGroup, overrideKeys = '', onStep = null, exactFacts = false) {
-  // Bigger batches mean fewer generate→fact-check round trips for the same
-  // total question count — each round trip is a full network call (plus any
-  // web_search/web_fetch turns), so this is the safest lever for speed
-  // without loosening what the fact-check pass accepts.
+  // Larger batches reduce API calls, while the lobby percent tracks only unique
+  // questions actually accepted from the model.
   const batchSize = 10;
-  // Two short batches keep the request safely below the hosting timeout. Each
-  // batch is still grounded with a live search when the model needs one.
-  const maxAttempts = 2;
+  // Keep generating and retrying until the requested number of actual model
+  // questions has arrived. The lobby reports accepted questions, not elapsed time.
   let all = [];
-  let provisional = [];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
   const sourceContext = await getSourceContext(topic, onStep);
   const exactFactsRule = exactFacts
-    ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. Для каждого такого факта сначала используй web_search, а при сомнении web_fetch. Не добавляй вопрос, если точное число нельзя подтвердить источником.'
+    ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. В первую очередь используй выдержки серверного поиска. Не добавляй точное число, если оно не подтверждается материалами или общеизвестным фактом.'
     : '';
 
-  for (let attempt = 0; attempt < maxAttempts && all.length < count; attempt++) {
+  for (let attempt = 0; all.length < count; attempt++) {
     const remaining = Math.min(batchSize, count - all.length);
     // Ask for more than needed since fact-checking drops a chunk of every
     // batch — overshoot harder as attempts pile up so a stubborn topic
@@ -437,11 +438,11 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
-    const sys = `Ты генератор вопросов для викторины. Сегодня 2026 год, и у тебя есть доступ к живому вебу через web_search и web_fetch. Используй поиск для свежих данных, точных цифр, дат, составов, версий, результатов и любой информации, в которой нельзя быть уверенным по памяти. Не изобретай факты.
+    const sys = `Ты генератор вопросов для викторины. Сервер уже выполнил поиск по теме и передал тебе найденные материалы. Инструменты поиска сейчас недоступны; используй приложенные выдержки как источник для точных дат, цифр и актуальных сведений. Если материалов недостаточно, выбирай надёжные общеизвестные факты и не выдумывай.
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
-КРИТИЧЕСКИ ВАЖНО: используй только реальные, проверяемые факты. Если не уверен в точной цифре, дате, статистике или имени — не придумывай их и не включай такой вопрос. Не выдумывай данные, которых нет в реальности (несуществующие матчи, трансферы, рекорды, персонажей, игровые предметы и т.п. — если тема про конкретную игру, используй только то, что реально существует в этой игре).${exactFactsRule}
+    КРИТИЧЕСКИ ВАЖНО: используй только реальные, проверяемые факты. Если не уверен в точной цифре, дате, статистике или имени — не придумывай их и не включай такой вопрос. Не выдумывай данные, которых нет в реальности (несуществующие матчи, трансферы, рекорды, персонажей, игровые предметы и т.п. — если тема про конкретную игру, используй только то, что реально существует в этой игре).${exactFactsRule}
 ${sourceContext ? `\nСвежие выдержки серверного поиска — используй их как приоритетный источник, но не копируй ссылки в вопросы:\n${sourceContext}` : ''}`;
 
     const userMsg = `Сгенерируй ${askFor} новых вопросов по теме "${topic}" на языке ${language}. Не повторяй уже использованные формулировки: ${all
@@ -458,18 +459,15 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
         ],
         true,
         overrideKeys,
-        true,
+        false,
         onStep
       );
     } catch (e) {
-      // One bad call (rate limit blip, transient network) shouldn't fail the
-      // whole room — try the next attempt instead of giving up immediately.
       console.error('[question-generation] upstream request failed', {
         status: e?.status || null,
         message: String(e?.message || e).slice(0, 240),
       });
-      onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
-      continue;
+      throw e;
     }
 
     let parsed;
@@ -478,7 +476,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
     } catch (e) {
       parsed = { questions: [] };
     }
-    const shapeValid = (parsed.questions || []).filter(
+    const shapeValid = (Array.isArray(parsed.questions) ? parsed.questions : []).filter(
       (q) => q.question && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(q.correct) && q.correct < q.options.length
     );
     if (!shapeValid.length) {
@@ -486,39 +484,15 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
       continue;
     }
 
-    // Preserve a valid generated batch before the optional second opinion. If
-    // a checker or an upstream web provider is temporarily unavailable, the
-    // game can still start instead of returning a 503 with no questions.
-    const existing = new Set(provisional.map((q) => q.question.trim().toLowerCase()));
-    provisional = provisional.concat(
-      shapeValid.filter((q) => {
-        const key = q.question.trim().toLowerCase();
-        if (existing.has(key)) return false;
-        existing.add(key);
-        return true;
-      })
-    );
-
-    // The batch was grounded by the server-side search above. Avoid a second
-    // full model request here: on the free instance it is what made a normal
-    // generation end as a 503 before any questions reached the player.
-    all = all.concat(shapeValid);
-    onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
-  }
-
-  // The generator has already been instructed to use live sources; this is a
-  // graceful fallback only when the separate checker rejects or times out.
-  if (all.length < count && provisional.length) {
     const existing = new Set(all.map((q) => q.question.trim().toLowerCase()));
-    all = all.concat(provisional.filter((q) => !existing.has(q.question.trim().toLowerCase())));
+    const uniqueQuestions = shapeValid.filter((q) => {
+      const key = q.question.trim().toLowerCase();
+      if (existing.has(key)) return false;
+      existing.add(key);
+      return true;
+    });
+    all = all.concat(uniqueQuestions);
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
-  }
-
-  // The game must remain playable when the upstream model rejects a request
-  // or is briefly unavailable. Use only server-found material when possible,
-  // and never send players back a generic 503 for a recoverable outage.
-  if (!all.length) {
-    all = fallbackQuestions(topic, count, sourceContext);
   }
 
   return all.slice(0, count);

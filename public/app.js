@@ -2658,8 +2658,10 @@ function roomGenProgressLabel(evt) {
   switch (evt.type) {
     case 'batch_start':
       return evt.have > 0
-        ? `Придумываю ещё вопросы (${evt.have}/${evt.total})...`
-        : 'Придумываю вопросы...';
+        ? `ИИ уже подготовил ${evt.have}/${evt.total}; генерирую дальше...`
+        : (evt.attempt > 1 ? `Продолжаю генерацию вопросов (попытка ${evt.attempt})...` : 'ИИ генерирует вопросы...');
+    case 'rate_limit_wait':
+      return `Запросов много — подожду ${evt.seconds} сек. и продолжу. Готовые вопросы сохранены.`;
     case 'web_search': {
       const q = (evt.query || '').length > 40 ? evt.query.slice(0, 40) + '…' : (evt.query || '');
       // Numbers/dates arrive already masked as ▓ blocks (server-side, before this
