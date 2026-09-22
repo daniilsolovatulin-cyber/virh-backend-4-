@@ -422,6 +422,7 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
   // Keep generating and retrying until the requested number of actual model
   // questions has arrived. The lobby reports accepted questions, not elapsed time.
   let all = [];
+  const correctPositionCounts = [0, 0, 0, 0];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
   const sourceContext = await getSourceContext(topic, onStep);
   const exactFactsRule = exactFacts
@@ -477,7 +478,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
       parsed = { questions: [] };
     }
     const shapeValid = (Array.isArray(parsed.questions) ? parsed.questions : []).filter(
-      (q) => q.question && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(q.correct) && q.correct < q.options.length
+      (q) => q.question && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(q.correct) && q.correct >= 0 && q.correct < q.options.length
     );
     if (!shapeValid.length) {
       onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
@@ -491,7 +492,30 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
       existing.add(key);
       return true;
     });
-    all = all.concat(uniqueQuestions);
+
+    // Models tend to put their answer first. Shuffle the distractors and place
+    // the correct answer in the least-used valid slot so each game has a
+    // balanced answer-key distribution without changing the correct answer.
+    const balancedQuestions = uniqueQuestions.map((q) => {
+      const slotCount = Math.min(q.options.length, correctPositionCounts.length);
+      const lowestCount = Math.min(...correctPositionCounts.slice(0, slotCount));
+      const leastUsedSlots = correctPositionCounts
+        .slice(0, slotCount)
+        .map((value, index) => value === lowestCount ? index : -1)
+        .filter((index) => index >= 0);
+      const correct = leastUsedSlots[Math.floor(Math.random() * leastUsedSlots.length)];
+      const correctAnswer = q.options[q.correct];
+      const distractors = q.options.filter((_, index) => index !== q.correct);
+      for (let i = distractors.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [distractors[i], distractors[j]] = [distractors[j], distractors[i]];
+      }
+      distractors.splice(correct, 0, correctAnswer);
+      correctPositionCounts[correct]++;
+      return { ...q, options: distractors, correct };
+    });
+
+    all = all.concat(balancedQuestions);
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
