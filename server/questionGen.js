@@ -5,6 +5,7 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // The full reasoning model is used by default. It may be overridden only on
 // the server, never by the browser or a player.
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const { loadQuestionMemory, rememberVerifiedQuestions } = require('./questionMemory');
 
 function getKeys(overrideKeys = '') {
   return (overrideKeys || process.env.GROQ_API_KEYS || '')
@@ -351,11 +352,15 @@ function extractJson(raw) {
 // This catches the case where generation invents plausible-sounding but nonexistent facts
 // (e.g. a football player's transfer fee, a match score, a release date) rather than only
 // checking the JSON shape. Returns the subset of questions judged factually sound.
-async function factCheckQuestions(topic, language, questions, overrideKeys, onStep) {
+async function factCheckQuestions(topic, language, questions, overrideKeys, onStep, knownFacts = [], cacheMinimum = 5) {
   if (!questions.length) return [];
 
+  const cachedFacts = knownFacts.map((item) => `- ${item.question} Правильный ответ: ${item.answer}`).join('\n');
+  const canUseCacheOnly = knownFacts.length >= cacheMinimum;
   const sys = `Ты строгий фактчекер для викторины на тему "${topic}". Тебе дают список вопросов с вариантами ответов и указанием правильного варианта.
-Сегодня 2026 год — у тебя есть доступ к живому вебу через web_search и web_fetch. Используй их для КАЖДОГО вопроса, где ты не уверен на 100% в точности факта (даты, статистика, счёт, трансферы, рекорды, актуальные данные на 2026 год и т.п.): сделай один точный web_search, при необходимости открой лучшую страницу через web_fetch, и только потом выноси вердикт. Не угадывай и не полагайся только на память, если факт можно проверить.
+${canUseCacheOnly
+    ? `Постоянная память содержит ранее проверенные факты. Сверяй новые вопросы именно с ней, принимай только вопросы, однозначно следующие из этих фактов. Не вызывай веб-инструменты и не добавляй неподтверждённые сведения.\n${cachedFacts}`
+    : 'Сегодня 2026 год — у тебя есть доступ к живому вебу через web_search и web_fetch. Используй их для КАЖДОГО вопроса, где ты не уверен на 100% в точности факта (даты, статистика, счёт, трансферы, рекорды, актуальные данные на 2026 год и т.п.): сделай один точный web_search, при необходимости открой лучшую страницу через web_fetch, и только потом выноси вердикт. Не угадывай и не полагайся только на память, если факт можно проверить.'}
 Для КАЖДОГО вопроса проверь:
 1. Правильный вариант действительно верен и соответствует реальным, проверяемым фактам — не выдуман ли он.
 2. Вопрос однозначен и не содержит внутреннего противоречия.
@@ -378,7 +383,7 @@ index — позиция вопроса в списке (начиная с 0), �
       ],
       true,
       overrideKeys,
-      true,
+      !canUseCacheOnly,
       onStep
     );
   } catch (e) {
@@ -412,7 +417,13 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
   let all = [];
   const correctPositionCounts = [0, 0, 0, 0];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
-  const sourceContext = await getSourceContext(topic, onStep);
+  const memory = loadQuestionMemory(topic, language);
+  const useMemoryOnly = memory.facts.length >= Math.min(5, count);
+  const sourceContext = useMemoryOnly ? '' : await getSourceContext(topic, onStep);
+  const memoryContext = memory.facts
+    .map((item, index) => `Проверенный факт ${index + 1}: ${item.question} Правильный ответ: ${item.answer}`)
+    .join('\n');
+  const recentQuestions = memory.questions.slice(-60);
   const exactFactsRule = exactFacts
     ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. В первую очередь используй выдержки серверного поиска. Не добавляй точное число, если оно не подтверждается материалами или общеизвестным фактом.'
     : '';
@@ -427,11 +438,14 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     onStep?.({ type: 'batch_start', attempt: attempt + 1, have: all.length, total: count });
 
-    const sys = `Ты генератор вопросов для викторины. Сервер уже выполнил поиск по теме и передал тебе найденные материалы. У тебя есть инструменты web_search и web_fetch для поиска в интернете и проверки источников. Ищи актуальные и точные факты, открывай страницы источников при необходимости; не выдумывай. Если материалов недостаточно, выбирай надёжные общеизвестные факты и не выдумывай.
+    const sys = `Ты генератор вопросов для викторины. ${useMemoryOnly
+      ? `Сервер передал тебе постоянную память — ранее проверенные факты по этой теме. Используй ТОЛЬКО эти факты; веб-поиск сейчас не нужен. Придумывай новые вопросы и другие углы проверки знания, не меняя смысл фактов и не повторяя сохранённые формулировки.\n${memoryContext}`
+      : 'Сервер выполнил поиск по теме. У тебя есть инструменты web_search и web_fetch для самостоятельного поиска и проверки фактов. Ищи актуальные сведения, открывай страницы источников при необходимости; если данных недостаточно, не выдумывай.'}
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
     КРИТИЧЕСКИ ВАЖНО: используй только реальные, проверяемые факты. Если не уверен в точной цифре, дате, статистике или имени — не придумывай их и не включай такой вопрос. Не выдумывай данные, которых нет в реальности (несуществующие матчи, трансферы, рекорды, персонажей, игровые предметы и т.п. — если тема про конкретную игру, используй только то, что реально существует в этой игре).${exactFactsRule}
+${recentQuestions.length ? `\nВопросы, которые уже задавались по этой теме. Не повторяй их и не делай лишь поверхностную переформулировку:\n${recentQuestions.map((q) => `- ${q}`).join('\n')}` : ''}
 ${sourceContext ? `\nСвежие выдержки серверного поиска — используй их как приоритетный источник, но не копируй ссылки в вопросы:\n${sourceContext}` : ''}`;
 
     const userMsg = `Сгенерируй ${askFor} новых вопросов по теме "${topic}" на языке ${language}. Не повторяй уже использованные формулировки: ${all
@@ -448,7 +462,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
         ],
         true,
         overrideKeys,
-        true,
+        !useMemoryOnly,
         onStep
       );
     } catch (e) {
@@ -473,9 +487,16 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
       continue;
     }
 
-    const existing = new Set(all.map((q) => q.question.trim().toLowerCase()));
-    const uniqueQuestions = shapeValid.filter((q) => {
-      const key = q.question.trim().toLowerCase();
+    const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep, memory.facts, Math.min(5, count));
+    if (!factChecked.length) {
+      onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
+      continue;
+    }
+
+    const normalizeQuestion = (value) => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[ё]/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
+    const existing = new Set([...memory.questions, ...all.map((q) => q.question)].map(normalizeQuestion));
+    const uniqueQuestions = factChecked.filter((q) => {
+      const key = normalizeQuestion(q.question);
       if (existing.has(key)) return false;
       existing.add(key);
       return true;
@@ -507,7 +528,13 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
-  return all.slice(0, count);
+  const result = all.slice(0, count);
+  try {
+    rememberVerifiedQuestions(memory.topicKey, result);
+  } catch (error) {
+    console.error('[question-memory] failed to save verified facts', String(error?.message || error).slice(0, 240));
+  }
+  return result;
 }
 
 async function generateTodPrompt(type, language, ageGroup, interest, overrideKeys = '') {

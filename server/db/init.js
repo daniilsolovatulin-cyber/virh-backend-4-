@@ -153,6 +153,25 @@ CREATE TABLE IF NOT EXISTS room_answers (
 );
 CREATE INDEX IF NOT EXISTS idx_room_members_room ON room_members(room_id);
 CREATE INDEX IF NOT EXISTS idx_room_answers_room_q ON room_answers(room_id, question_idx);
+CREATE TABLE IF NOT EXISTS verified_quiz_facts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_key TEXT NOT NULL,
+  question_key TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(topic_key, question_key)
+);
+CREATE INDEX IF NOT EXISTS idx_verified_quiz_facts_topic ON verified_quiz_facts(topic_key, id DESC);
+CREATE TABLE IF NOT EXISTS quiz_question_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic_key TEXT NOT NULL,
+  question_key TEXT NOT NULL,
+  question TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(topic_key, question_key)
+);
+CREATE INDEX IF NOT EXISTS idx_quiz_question_history_topic ON quiz_question_history(topic_key, id DESC);
 `);
 try { db.exec("ALTER TABLE rooms ADD COLUMN name TEXT"); } catch (e) {}
 try { db.exec("ALTER TABLE rooms ADD COLUMN max_players INTEGER NOT NULL DEFAULT 0"); } catch (e) {}
