@@ -52,6 +52,15 @@ router.post('/questions', soloLimit, async (req, res, next) => {
     }
     res.json({ questions });
   } catch (err) {
+    if (err?.status === 429) {
+      return res.status(429).json({ error: 'model_rate_limit', message: 'Лимит модели исчерпан. Попробуйте позже или используйте личный ключ.' });
+    }
+    if (err?.status === 401 || err?.status === 403) {
+      return res.status(503).json({ error: 'model_access_denied', message: 'Ключ модели недействителен или доступ к модели закрыт.' });
+    }
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      return res.status(504).json({ error: 'generation_timeout', message: 'Генерация заняла слишком много времени. Попробуйте ещё раз.' });
+    }
     next(err);
   }
 });

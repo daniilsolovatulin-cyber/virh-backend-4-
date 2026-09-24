@@ -5,6 +5,7 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 // The full reasoning model is used by default. It may be overridden only on
 // the server, never by the browser or a player.
 const MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GENERATION_TIMEOUT_MS = 50000;
 const { loadQuestionMemory, rememberVerifiedQuestions } = require('./questionMemory');
 
 function getKeys(overrideKeys = '') {
@@ -94,35 +95,32 @@ function parseJinaMarkdown(markdown, maxResults) {
   return results;
 }
 
-async function timeoutFetch(url, accept, ms = 7000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), ms);
-  try {
-    return await fetch(url, { headers: { Accept: accept, 'User-Agent': 'Mozilla/5.0 (compatible; VihrBot/1.0)' }, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
+async function timeoutFetch(url, accept, ms = 3500, signal) {
+  return fetch(url, {
+    headers: { Accept: accept, 'User-Agent': 'Mozilla/5.0 (compatible; VihrBot/1.0)' },
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms),
+  });
 }
 
-async function webSearch(query, maxResults = 4) {
+async function webSearch(query, maxResults = 4, signal) {
   const clean = String(query || '').trim().slice(0, 240);
   if (!clean) return { ok: false, error: 'empty_query', results: [] };
   try {
     try {
-      const direct = await timeoutFetch(`https://duckduckgo.com/html/?q=${encodeURIComponent(clean)}`, 'text/html');
+      const direct = await timeoutFetch(`https://duckduckgo.com/html/?q=${encodeURIComponent(clean)}`, 'text/html', 3500, signal);
       if (direct.ok) {
         const results = parseDdgHtml(await direct.text(), maxResults);
         if (results.length) return { ok: true, results };
       }
-    } catch { /* fall through to proxy */ }
+    } catch { if (signal?.aborted) throw signal.reason; }
     try {
-      const proxied = await timeoutFetch(`https://r.jina.ai/http://duckduckgo.com/html/?q=${encodeURIComponent(clean)}`, 'text/plain');
+      const proxied = await timeoutFetch(`https://r.jina.ai/http://duckduckgo.com/html/?q=${encodeURIComponent(clean)}`, 'text/plain', 3500, signal);
       if (proxied.ok) {
         const results = parseJinaMarkdown(await proxied.text(), maxResults);
         if (results.length) return { ok: true, results };
       }
-    } catch { /* fall through to instant answer */ }
-    const instant = await timeoutFetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(clean)}&format=json&no_html=1&skip_disambig=1`, 'application/json');
+    } catch { if (signal?.aborted) throw signal.reason; }
+    const instant = await timeoutFetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(clean)}&format=json&no_html=1&skip_disambig=1`, 'application/json', 3500, signal);
     if (instant.ok) {
       const data = await instant.json();
       const results = [];
@@ -136,6 +134,7 @@ async function webSearch(query, maxResults = 4) {
     }
     return { ok: false, error: 'no_results', results: [] };
   } catch (e) {
+    if (signal?.aborted) throw signal.reason;
     return { ok: false, error: String(e?.message || e), results: [] };
   }
 }
@@ -144,9 +143,9 @@ async function webSearch(query, maxResults = 4) {
 // as ordinary context. Groq's tool-call mode can stall on the free service;
 // this keeps the same current-data grounding without making the player wait
 // for a multi-turn tool conversation.
-async function getSourceContext(topic, onStep) {
+async function getSourceContext(topic, onStep, signal) {
   onStep?.({ type: 'web_search', query: maskSpoilerNumbers(topic) });
-  const result = await webSearch(topic, 4);
+  const result = await webSearch(topic, 4, signal);
   onStep?.({ type: 'web_search_done', query: maskSpoilerNumbers(topic), count: result.results?.length || 0, ok: result.ok });
   if (!result.ok || !result.results?.length) return '';
   return result.results
@@ -154,18 +153,18 @@ async function getSourceContext(topic, onStep) {
     .join('\n');
 }
 
-async function webFetch(url, maxChars = 1600) {
+async function webFetch(url, maxChars = 1600, signal) {
   const target = String(url || '').trim();
   if (!/^https?:\/\//i.test(target)) return { ok: false, error: 'invalid_url', text: '' };
   const read = async (candidate, accept) => {
-    const res = await timeoutFetch(candidate, accept);
+    const res = await timeoutFetch(candidate, accept, 3500, signal);
     if (!res.ok) throw new Error(`fetch_failed_${res.status}`);
     return { body: await res.text(), type: res.headers.get('content-type') || '' };
   };
   try {
     let payload;
     try { payload = await read(target, 'text/html,application/json'); }
-    catch { payload = await read(`https://r.jina.ai/${target}`, 'text/plain'); }
+    catch { if (signal?.aborted) throw signal.reason; payload = await read(`https://r.jina.ai/${target}`, 'text/plain'); }
     let text = payload.body;
     if (!/json|text\/plain/i.test(payload.type)) {
       text = text
@@ -176,6 +175,7 @@ async function webFetch(url, maxChars = 1600) {
     text = compactText(text, maxChars);
     return text ? { ok: true, text } : { ok: false, error: 'empty_page', text: '' };
   } catch (e) {
+    if (signal?.aborted) throw signal.reason;
     return { ok: false, error: String(e?.message || e), text: '' };
   }
 }
@@ -222,13 +222,13 @@ function maskSpoilerNumbers(text) {
     .replace(/\b\d+([.,]\d+)?\b/g, (m) => '▓'.repeat(Math.min(m.length, 4)));
 }
 
-async function runToolCall(call, onStep) {
+async function runToolCall(call, onStep, signal) {
   let args = {};
   try { args = JSON.parse(call.function?.arguments || '{}'); } catch { /* leave empty */ }
   if (call.function?.name === 'web_search') {
     const rawQuery = args.query || '';
     onStep?.({ type: 'web_search', query: maskSpoilerNumbers(rawQuery) });
-    const result = await webSearch(rawQuery, 4); // the actual search still uses the real query
+    const result = await webSearch(rawQuery, 4, signal); // the actual search still uses the real query
     onStep?.({ type: 'web_search_done', query: maskSpoilerNumbers(rawQuery), count: result.results?.length || 0, ok: result.ok });
     return result;
   }
@@ -236,16 +236,16 @@ async function runToolCall(call, onStep) {
     let host = args.url || '';
     try { host = new URL(args.url).hostname; } catch { /* keep raw */ }
     onStep?.({ type: 'web_fetch', host });
-    const result = await webFetch(args.url || '');
+    const result = await webFetch(args.url || '', 1600, signal);
     onStep?.({ type: 'web_fetch_done', host, ok: result.ok });
     return result;
   }
   return { ok: false, error: 'unknown_tool' };
 }
 
-async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
+async function callGroqWithKey(key, messages, jsonMode, useWebTools, model = MODEL, signal) {
   const body = {
-    model: MODEL,
+    model,
     messages,
     temperature: 0.9,
     // json_object and tools are mutually exclusive on a tool-enabled turn: forcing
@@ -254,90 +254,68 @@ async function callGroqWithKey(key, messages, jsonMode, useWebTools) {
     ...(jsonMode && !useWebTools ? { response_format: { type: 'json_object' } } : {}),
     ...(useWebTools ? { tools: WEB_TOOL_SCHEMAS, tool_choice: 'auto' } : {}),
   };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 120000);
-  let res;
-  try {
-    res = await fetch(GROQ_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  const res = await fetch(GROQ_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify(body),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(18000)]) : AbortSignal.timeout(18000),
+  });
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    const err = new Error(`Groq API: ${res.status} ${errText.slice(0, 200)}`);
+    let providerError = {};
+    try { providerError = JSON.parse(errText).error || {}; } catch { /* status is enough */ }
+    const err = new Error(`Groq API: ${res.status}`);
     err.status = res.status;
-    if (res.status === 429) err.retryAfterMs = providerRetryDelayMs(res.headers, 5000);
+    err.code = providerError.code || null;
     throw err;
   }
   const data = await res.json();
-  return data.choices[0].message;
+  const message = data?.choices?.[0]?.message;
+  if (!message || (!message.tool_calls?.length && !message.content?.trim())) {
+    const err = new Error('empty_model_response');
+    err.code = 'empty_model_response';
+    throw err;
+  }
+  return message;
 }
 
-// Run live web tools over multiple model turns. Retries happen per turn so rate
-// limits do not discard completed searches or page reads.
-async function callGroq(messages, jsonMode, overrideKeys = '', useWebTools = false, onStep = null) {
+// Bound provider calls and tool turns. A 429 can last until the next daily
+// reset, so waiting for Retry-After here would strand a whole lobby.
+async function callGroq(messages, jsonMode, overrideKeys = '', useWebTools = false, onStep = null, signal) {
   const keys = getKeys(overrideKeys);
   if (!keys.length) throw new Error('no_server_keys_configured');
-  const history = [...messages];
-  const evidence = [];
-  const maxToolTurns = 6;
-  let toolTurns = 0;
-  let retryAttempt = 0;
-
-  while (true) {
-    let message = null;
-    let lastErr = null;
-    let rateLimited = null;
-    for (const key of keys) {
-      try {
-        message = await callGroqWithKey(key, history, jsonMode, useWebTools && toolTurns < maxToolTurns);
-        break;
-      } catch (err) {
-        lastErr = err;
-        if (err.status === 429 || err.status >= 500 || !err.status) {
-          if (!rateLimited || (err.retryAfterMs || 0) > (rateLimited.retryAfterMs || 0)) rateLimited = err;
-          continue;
+  let lastErr;
+  for (const key of keys) {
+    try {
+      const first = await callGroqWithKey(key, messages, jsonMode, useWebTools, MODEL, signal);
+      if (!useWebTools || !first.tool_calls?.length) return first.content;
+      const evidence = [];
+      for (const call of first.tool_calls) {
+        const result = await runToolCall(call, onStep, signal);
+        evidence.push(`${call.function?.name || 'web'}: ${JSON.stringify(result)}`);
+      }
+      const finalMessages = [...messages, {
+        role: 'system',
+        content: `Поиск завершён. Не вызывай инструменты. Используй найденные источники и ответь строго JSON.\n${evidence.join('\n').slice(0, 14000)}`,
+      }];
+      const final = await callGroqWithKey(key, finalMessages, jsonMode, false, MODEL, signal);
+      return final.content;
+    } catch (err) {
+      if (signal?.aborted) throw signal.reason;
+      lastErr = err;
+      if (MODEL === 'openai/gpt-oss-120b' && (err.status === 429 || (err.status === 400 && err.code === 'tool_use_failed') || err.code === 'empty_model_response')) {
+        try {
+          const fallbackMessages = [...messages, { role: 'system', content: 'Инструменты недоступны. Используй только уже переданные источники и ответь строго JSON.' }];
+          const fallback = await callGroqWithKey(key, fallbackMessages, jsonMode, false, 'openai/gpt-oss-20b', signal);
+          return fallback.content;
+        } catch (fallbackError) {
+          if (signal?.aborted) throw signal.reason;
+          lastErr = fallbackError;
         }
-        if (err.status === 401 || err.status === 403) continue;
-        throw err;
       }
     }
-    if (!message) {
-      if (!rateLimited) throw lastErr || new Error('all_keys_failed');
-      const delayMs = Math.max(rateLimited.retryAfterMs || 0, Math.min(60000, 5000 * (2 ** Math.min(retryAttempt, 4))));
-      retryAttempt++;
-      onStep?.({ type: 'rate_limit_wait', seconds: Math.ceil(delayMs / 1000), attempt: retryAttempt });
-      await sleep(delayMs);
-      continue;
-    }
-    if (!useWebTools || !message.tool_calls?.length) return message.content;
-
-    history.push({ role: 'assistant', content: message.content || null, tool_calls: message.tool_calls });
-    for (const call of message.tool_calls) {
-      const result = await runToolCall(call, onStep);
-      const serialized = JSON.stringify(result);
-      evidence.push(`${call.function?.name || 'web'}: ${serialized}`);
-      history.push({ role: 'tool', tool_call_id: call.id, name: call.function?.name, content: serialized });
-    }
-    toolTurns++;
-    if (toolTurns >= maxToolTurns) {
-      // Close with a clean JSON-mode request, carrying sources as context rather
-      // than an unfinished tool-call transcript.
-      const finalMessages = [
-        ...messages,
-        { role: 'system', content: `Поиск завершён. Используй найденные источники ниже и сформируй финальный ответ строго в запрошенном формате.\n${evidence.join('\n').slice(0, 14000)}` },
-      ];
-      return callGroq(finalMessages, jsonMode, overrideKeys, false, onStep);
-    }
   }
+  throw lastErr || new Error('all_keys_failed');
 }
 function extractJson(raw) {
   let cleaned = raw.trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -352,7 +330,7 @@ function extractJson(raw) {
 // This catches the case where generation invents plausible-sounding but nonexistent facts
 // (e.g. a football player's transfer fee, a match score, a release date) rather than only
 // checking the JSON shape. Returns the subset of questions judged factually sound.
-async function factCheckQuestions(topic, language, questions, overrideKeys, onStep, knownFacts = [], cacheMinimum = 5) {
+async function factCheckQuestions(topic, language, questions, overrideKeys, onStep, knownFacts = [], cacheMinimum = 5, sourceContext = '', signal) {
   if (!questions.length) return [];
 
   const cachedFacts = knownFacts.map((item) => `- ${item.question} Правильный ответ: ${item.answer}`).join('\n');
@@ -360,14 +338,15 @@ async function factCheckQuestions(topic, language, questions, overrideKeys, onSt
   const sys = `Ты строгий фактчекер для викторины на тему "${topic}". Тебе дают список вопросов с вариантами ответов и указанием правильного варианта.
 ${canUseCacheOnly
     ? `Постоянная память содержит ранее проверенные факты. Сверяй новые вопросы именно с ней, принимай только вопросы, однозначно следующие из этих фактов. Не вызывай веб-инструменты и не добавляй неподтверждённые сведения.\n${cachedFacts}`
-    : 'Сегодня 2026 год — у тебя есть доступ к живому вебу через web_search и web_fetch. Используй их для КАЖДОГО вопроса, где ты не уверен на 100% в точности факта (даты, статистика, счёт, трансферы, рекорды, актуальные данные на 2026 год и т.п.): сделай один точный web_search, при необходимости открой лучшую страницу через web_fetch, и только потом выноси вердикт. Не угадывай и не полагайся только на память, если факт можно проверить.'}
+    : 'Сегодня 2026 год. Сверяй вопросы с предоставленными сервером выдержками источников. Если для точного факта (даты, счёта, рекорда, статистики) подтверждения недостаточно, пометь вопрос невалидным. Не вызывай веб-инструменты и не угадывай.'}
 Для КАЖДОГО вопроса проверь:
 1. Правильный вариант действительно верен и соответствует реальным, проверяемым фактам — не выдуман ли он.
 2. Вопрос однозначен и не содержит внутреннего противоречия.
 3. Если тема касается спортивной статистики, счёта матчей, трансферов, рекордов, дат, версий игр/продуктов и подобных точных данных — будь особенно строг: если после поиска сомнение осталось, считай вопрос невалидным, а не угадывай.
 Когда закончишь проверку и не планируешь больше вызывать инструменты, отвечай ТОЛЬКО JSON без пояснений и без markdown, в формате:
 {"results": [{"index": 0, "valid": true}, {"index": 1, "valid": false, "reason": "краткая причина"}]}
-index — позиция вопроса в списке (начиная с 0), по одному объекту на каждый вопрос из списка. Язык вопросов: ${language}.`;
+index — позиция вопроса в списке (начиная с 0), по одному объекту на каждый вопрос из списка. Язык вопросов: ${language}.
+${sourceContext ? `Серверные выдержки источников для проверки:\n${sourceContext}` : ''}`;
 
   const userMsg = JSON.stringify(
     questions.map((q, i) => ({ index: i, question: q.question, options: q.options, correctAnswer: q.options[q.correct] }))
@@ -383,8 +362,9 @@ index — позиция вопроса в списке (начиная с 0), �
       ],
       true,
       overrideKeys,
-      !canUseCacheOnly,
-      onStep
+      false,
+      onStep,
+      signal
     );
   } catch (e) {
     // Fact-check call itself failed (rate limit, network, etc). Fail safe by keeping
@@ -412,23 +392,25 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
   // Larger batches reduce API calls, while the lobby percent tracks only unique
   // questions actually accepted from the model.
   const batchSize = 10;
-  // Keep generating and retrying until the requested number of actual model
-  // questions has arrived. The lobby reports accepted questions, not elapsed time.
+  // Limit both the number of attempts and total time. An exhausted provider
+  // quota or an overly strict fact check must not trap a room in generation.
+  const maxAttempts = Math.max(2, Math.ceil(count / batchSize) + 1);
+  const signal = AbortSignal.timeout(GENERATION_TIMEOUT_MS);
   let all = [];
   const correctPositionCounts = [0, 0, 0, 0];
   const ageHint = AGE_PROMPT_HINTS[ageGroup] || AGE_PROMPT_HINTS.any;
   const memory = loadQuestionMemory(topic, language);
   const useMemoryOnly = memory.facts.length >= Math.min(5, count);
-  const sourceContext = useMemoryOnly ? '' : await getSourceContext(topic, onStep);
+  const sourceContext = useMemoryOnly ? '' : await getSourceContext(topic, onStep, signal);
   const memoryContext = memory.facts
     .map((item, index) => `Проверенный факт ${index + 1}: ${item.question} Правильный ответ: ${item.answer}`)
     .join('\n');
   const recentQuestions = memory.questions.slice(-60);
   const exactFactsRule = exactFacts
-    ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: каждый вопрос должен опираться на конкретный проверяемый факт с числом — год, дату, количество, расстояние, длительность, счёт или рекорд. В первую очередь используй выдержки серверного поиска. Не добавляй точное число, если оно не подтверждается материалами или общеизвестным фактом.'
+    ? '\nРЕЖИМ ТОЧНЫХ ФАКТОВ: если в вопросе есть год, дата, количество, счёт или рекорд, подтверждай число источником. Не заставляй каждый вопрос содержать число: выбирай естественные для темы факты, события и понятия. Никогда не спрашивай, какой год или слово «упоминается в найденных материалах». Если факт не подтверждается, замени вопрос другим по той же теме.'
     : '';
 
-  for (let attempt = 0; all.length < count; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts && all.length < count && !signal.aborted; attempt++) {
     const remaining = Math.min(batchSize, count - all.length);
     // Ask for more than needed since fact-checking drops a chunk of every
     // batch — overshoot harder as attempts pile up so a stubborn topic
@@ -440,7 +422,7 @@ async function generateQuestions(topic, language, count, ageGroup, overrideKeys 
 
     const sys = `Ты генератор вопросов для викторины. ${useMemoryOnly
       ? `Сервер передал тебе постоянную память — ранее проверенные факты по этой теме. Используй ТОЛЬКО эти факты; веб-поиск сейчас не нужен. Придумывай новые вопросы и другие углы проверки знания, не меняя смысл фактов и не повторяя сохранённые формулировки.\n${memoryContext}`
-      : 'Сервер выполнил поиск по теме. У тебя есть инструменты web_search и web_fetch для самостоятельного поиска и проверки фактов. Ищи актуальные сведения, открывай страницы источников при необходимости; если данных недостаточно, не выдумывай.'}
+      : 'Сервер выполнил поиск по теме и передал найденные выдержки ниже. Используй их для свежих сведений; веб-инструменты в этой попытке недоступны. Если данных недостаточно, не выдумывай.'}
 Когда закончишь (или если поиск не понадобился), отвечай ТОЛЬКО валидным JSON без пояснений, без markdown, в формате:
 {"questions": [{"question": "текст вопроса", "options": ["вариант1","вариант2","вариант3","вариант4"], "correct": 0}]}
 correct — индекс правильного варианта (0-3). Вопросы должны быть на языке: ${language}. Тема: ${topic}. Разнообразные, интересные, без повторов, средней сложности. ${ageHint}
@@ -462,13 +444,14 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
         ],
         true,
         overrideKeys,
-        !useMemoryOnly,
-        onStep
+        false,
+        onStep,
+        signal
       );
     } catch (e) {
       console.error('[question-generation] upstream request failed', {
         status: e?.status || null,
-        message: String(e?.message || e).slice(0, 240),
+        code: e?.code || (signal.aborted ? 'generation_timeout' : 'upstream_error'),
       });
       throw e;
     }
@@ -480,14 +463,17 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
       parsed = { questions: [] };
     }
     const shapeValid = (Array.isArray(parsed.questions) ? parsed.questions : []).filter(
-      (q) => q.question && Array.isArray(q.options) && q.options.length >= 2 && Number.isInteger(q.correct) && q.correct >= 0 && q.correct < q.options.length
+      (q) => q && typeof q.question === 'string' && q.question.trim() &&
+        Array.isArray(q.options) && q.options.length === 4 &&
+        q.options.every((option) => typeof option === 'string' && option.trim()) &&
+        Number.isInteger(q.correct) && q.correct >= 0 && q.correct < q.options.length
     );
     if (!shapeValid.length) {
       onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
       continue;
     }
 
-    const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep, memory.facts, Math.min(5, count));
+    const factChecked = await factCheckQuestions(topic, language, shapeValid, overrideKeys, onStep, memory.facts, Math.min(5, count), sourceContext, signal);
     if (!factChecked.length) {
       onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
       continue;
@@ -528,6 +514,7 @@ ${sourceContext ? `\nСвежие выдержки серверного поис
     onStep?.({ type: 'batch_done', have: Math.min(all.length, count), total: count });
   }
 
+  if (!all.length && signal.aborted) throw signal.reason;
   const result = all.slice(0, count);
   try {
     rememberVerifiedQuestions(memory.topicKey, result);

@@ -390,6 +390,8 @@ function markLeft(roomId, userId) {
 }
 
 function initRealtime(server) {
+  // A restart cannot resume an in-flight model request.
+  db.prepare("UPDATE rooms SET status = 'lobby', updated_at = datetime('now') WHERE status = 'generating'").run();
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', (req, socket, head) => {

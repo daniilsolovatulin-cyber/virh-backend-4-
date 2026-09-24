@@ -1410,6 +1410,8 @@ function bindSetup() {
       else if (err && err.status === 401) msg = 'Groq: ключ недействителен (401)';
       else if (err && err.status === 403) msg = 'Groq: доступ запрещён (403)';
       else if (err && err.status === 429) msg = 'Groq: лимит запросов исчерпан (429)';
+      else if (err && (err.code === 'timeout' || err.code === 'generation_timeout')) msg = 'Генерация заняла слишком много времени. Попробуй ещё раз';
+      else if (err && err.message && err.status >= 500) msg = err.message;
       else if (err && err.status) msg = 'Groq вернул ошибку ' + err.status;
       else if (err && /fetch|network|Failed to fetch/i.test(err.message || '')) msg = 'Нет сети / запрос к api.groq.com заблокирован';
       showToast(msg, ICONS.cross);
@@ -2440,6 +2442,10 @@ function handleRoomMessage(msg) {
         if (listEl) {
           listEl.innerHTML = roomMemberListHTML();
           bindRoomMemberList();
+          const capacityEl = document.getElementById('roomCapacityPill');
+          if (capacityEl) capacityEl.innerHTML = roomCapacityHTML();
+          const membersLabel = document.getElementById('roomMembersLabel');
+          if (membersLabel) membersLabel.textContent = `Игроки (${state.roomMembers.length}${state.room?.maxPlayers ? ' / ' + state.room.maxPlayers : ''})`;
         } else {
           document.getElementById('appMain').innerHTML = roomLobbyHTML();
           bindRoomLobby();
@@ -2542,6 +2548,10 @@ function handleRoomMessage(msg) {
         Sound.stopMusic();
         state.view = 'roomLobby';
         render();
+      }
+      if (msg.status === 'lobby' && state.view === 'roomLobby') {
+        document.getElementById('appMain').innerHTML = roomLobbyHTML();
+        bindRoomLobby();
       }
       break;
 
@@ -2755,6 +2765,18 @@ function bindRoomMemberList() {
   });
 }
 
+function roomCapacityHTML() {
+  const members = state.roomMembers || [];
+  const maxPlayers = state.room?.maxPlayers;
+  return `<div class="room-capacity-avatars">
+    ${members.slice(0, 5).map((m) => avatarHTML(m, 'sm')).join('')}
+    ${members.length > 5 ? `<span class="avatar sm room-browse-more">+${members.length - 5}</span>` : ''}
+  </div>
+  <span class="room-capacity-count">
+    ${ICONS.users} ${members.length} <span class="room-capacity-max">${maxPlayers ? '/ ' + maxPlayers : 'без лимита'}</span>
+  </span>`;
+}
+
 function roomLobbyHTML() {
   const room = state.room;
   if (!room) return `<div class="empty-state">${ICONS.users}<div class="title">Комната не найдена</div></div>`;
@@ -2779,15 +2801,7 @@ function roomLobbyHTML() {
       <button class="btn-ghost" id="copyCodeBtn">${ICONS.copy} Скопировать</button>
     </div>
 
-    <div class="room-capacity-pill">
-      <div class="room-capacity-avatars">
-        ${members.slice(0, 5).map((m) => avatarHTML(m, 'sm')).join('')}
-        ${members.length > 5 ? `<span class="avatar sm room-browse-more">+${members.length - 5}</span>` : ''}
-      </div>
-      <span class="room-capacity-count">
-        ${ICONS.users} ${members.length}${room.maxPlayers ? ` <span class="room-capacity-max">/ ${room.maxPlayers}</span>` : ` <span class="room-capacity-max">без лимита</span>`}
-      </span>
-    </div>
+    <div class="room-capacity-pill" id="roomCapacityPill">${roomCapacityHTML()}</div>
 
     <div class="section-label">Общее</div>
     <div class="panel lobby-general-panel">
@@ -2824,7 +2838,7 @@ function roomLobbyHTML() {
       </div>
     ` : ''}
 
-    <div class="section-label">Игроки (${members.length}${room.maxPlayers ? ' / ' + room.maxPlayers : ''})</div>
+    <div class="section-label" id="roomMembersLabel">Игроки (${members.length}${room.maxPlayers ? ' / ' + room.maxPlayers : ''})</div>
     <div id="roomMemberListWrap">${roomMemberListHTML()}</div>
 
     <div style="margin-top:22px;">

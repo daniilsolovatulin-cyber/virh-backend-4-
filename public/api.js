@@ -19,8 +19,10 @@ const Api = (() => {
     try {
       res = await fetch(API_BASE + path, { ...opts, headers });
     } catch (e) {
-      const err = new Error('network');
-      err.network = true;
+      const timedOut = e?.name === 'TimeoutError' || (e?.name === 'AbortError' && opts.signal?.aborted);
+      const err = new Error(timedOut ? 'timeout' : 'network');
+      err.network = !timedOut;
+      err.code = timedOut ? 'timeout' : 'network';
       throw err;
     }
 
@@ -66,7 +68,7 @@ const Api = (() => {
     changePassword: (currentPassword, newPassword) =>
       request('/api/auth/me/password', { method: 'POST', body: JSON.stringify({ currentPassword, newPassword }) }),
 
-    generateSoloQuestions: (payload) => request('/api/solo/questions', { method: 'POST', body: JSON.stringify(payload) }),
+    generateSoloQuestions: (payload) => request('/api/solo/questions', { method: 'POST', body: JSON.stringify(payload), signal: AbortSignal.timeout(60000) }),
 
     generateTodPrompt: (payload) => request('/api/solo/truth-or-dare', { method: 'POST', body: JSON.stringify(payload) }),
 
