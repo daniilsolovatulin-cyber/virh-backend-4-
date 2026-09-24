@@ -2442,15 +2442,12 @@ function handleRoomMessage(msg) {
         if (listEl) {
           listEl.innerHTML = roomMemberListHTML();
           bindRoomMemberList();
-          const capacityEl = document.getElementById('roomCapacityPill');
-          if (capacityEl) capacityEl.innerHTML = roomCapacityHTML();
-          const membersLabel = document.getElementById('roomMembersLabel');
-          if (membersLabel) membersLabel.textContent = `Игроки (${state.roomMembers.length}${state.room?.maxPlayers ? ' / ' + state.room.maxPlayers : ''})`;
         } else {
           document.getElementById('appMain').innerHTML = roomLobbyHTML();
           bindRoomLobby();
         }
       }
+      if (state.view === 'roomLobby') syncLobbyMemberControls();
       renderChatFab();
       // Play the join chime after rendering (so the animation and sound land together),
       // but only for players other than us — our own join doesn't need a sound cue.
@@ -2775,6 +2772,16 @@ function roomCapacityHTML() {
   <span class="room-capacity-count">
     ${ICONS.users} ${members.length} <span class="room-capacity-max">${maxPlayers ? '/ ' + maxPlayers : 'без лимита'}</span>
   </span>`;
+}
+
+function syncLobbyMemberControls() {
+  const members = state.roomMembers || [];
+  const capacityEl = document.getElementById('roomCapacityPill');
+  if (capacityEl) capacityEl.innerHTML = roomCapacityHTML();
+  const membersLabel = document.getElementById('roomMembersLabel');
+  if (membersLabel) membersLabel.textContent = `Игроки (${members.length}${state.room?.maxPlayers ? ' / ' + state.room.maxPlayers : ''})`;
+  const startBtn = document.getElementById('startRoomGameBtn');
+  if (startBtn) startBtn.disabled = members.length === 0 || state.room?.status !== 'lobby';
 }
 
 function roomLobbyHTML() {
